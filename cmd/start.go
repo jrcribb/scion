@@ -39,10 +39,24 @@ form the task prompt, which is passed to the gemini command.`,
 		fmt.Printf("Starting agent '%s' for task: %s\n", agentName, task)
 
 		// 1. Prepare agent directories
-		agentsDir, err := config.GetProjectAgentsDir()
-		if err != nil {
-			return err
+		var agentsDir string
+		repoDir, hasRepoConfig := config.GetRepoDir()
+
+		if hasRepoConfig {
+			// If .gswarm exists at repo root, verify .gitignore
+			if !util.IsIgnored(".gswarm/agents/") {
+				return fmt.Errorf("security error: '.gswarm/agents/' must be in .gitignore when using a project-local swarm")
+			}
+			agentsDir = filepath.Join(repoDir, "agents")
+		} else {
+			// Fallback to global agents directory
+			var err error
+			agentsDir, err = config.GetGlobalAgentsDir()
+			if err != nil {
+				return err
+			}
 		}
+
 		agentDir := filepath.Join(agentsDir, agentName)
 		agentHome := filepath.Join(agentDir, "home")
 		agentWorkspace := filepath.Join(agentDir, "workspace")
@@ -50,8 +64,18 @@ form the task prompt, which is passed to the gemini command.`,
 		if err := os.MkdirAll(agentHome, 0755); err != nil {
 			return fmt.Errorf("failed to create agent home: %w", err)
 		}
-		if err := os.MkdirAll(agentWorkspace, 0755); err != nil {
-			return fmt.Errorf("failed to create agent workspace: %w", err)
+
+		if util.IsGitRepo() {
+			fmt.Printf("Creating git worktree for agent '%s'...\n", agentName)
+			// Remove existing workspace dir if it exists to allow worktree add
+			os.RemoveAll(agentWorkspace)
+			if err := util.CreateWorktree(agentWorkspace, agentName); err != nil {
+				return fmt.Errorf("failed to create git worktree: %w", err)
+			}
+		} else {
+			if err := os.MkdirAll(agentWorkspace, 0755); err != nil {
+				return fmt.Errorf("failed to create agent workspace: %w", err)
+			}
 		}
 
 		// 2. Load and copy templates
