@@ -29,7 +29,11 @@ cd my-project
 scion grove init
 ```
 
-### 2. Start an Agent
+### 2. Provision and Start Agents
+
+You can launch an agent immediately using `start` (or its alias `run`), or provision it first using `create` to customize it before execution.
+
+#### Option A: Quick Start (Immediate Execution)
 
 Launch a new agent to perform a specific task. By default, this runs in the background.
 
@@ -37,12 +41,34 @@ Launch a new agent to perform a specific task. By default, this runs in the back
 # Start a generic agent named "coder"
 scion start coder "Refactor the authentication middleware in pkg/auth"
 
-# Start a specialized agent using a template
-scion start auditor "Audit the user input validation" --type security-auditor
+# Using the 'run' alias
+scion run auditor "Audit the user input validation" --type security-auditor
 
 # Start and immediately attach to the session
 scion start debug "Help me debug this error" --attach
 ```
+
+#### Option B: Create-Then-Start (Customization Workflow)
+
+The `create` command allows you to provision an agent's directory structure without launching a container. This is useful for customizing an agent's environment or testing its behavior before it starts its task.
+
+1. **Create the agent:**
+   ```bash
+   scion create my-agent --type research-specialist
+   ```
+
+2. **Customize the agent:**
+   Navigate to the agent's home directory to edit its configuration, system prompt, or provided tools:
+   ```bash
+   cd .scion/agents/my-agent/home
+   # Edit scion.json, .gemini/system_prompt.md, etc.
+   ```
+
+3. **Start the agent:**
+   When you are ready, use `start` (or `run`) with the agent's name. Scion will detect the existing directory and use your customizations.
+   ```bash
+   scion start my-agent "Analyze the latest trends in quantum computing"
+   ```
 
 ### 3. List Running Agents
 

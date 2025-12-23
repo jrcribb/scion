@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 
 	"github.com/ptone/scion-agent/pkg/config"
 	"github.com/ptone/scion-agent/pkg/runtime"
-	"github.com/ptone/scion-agent/pkg/util"
 	"github.com/spf13/cobra"
 )
 
@@ -25,8 +23,9 @@ var (
 
 // startCmd represents the start command
 var startCmd = &cobra.Command{
-	Use:   "start <agent-name> <task...>",
-	Short: "Launch a new scion agent",
+	Use:     "start <agent-name> <task...>",
+	Aliases: []string{"run"},
+	Short:   "Launch a new scion agent",
 	Long: `Provision and launch a new isolated LLM agent to perform a specific task.
 The agent will be created from a template and run in a detached container.
 
@@ -37,91 +36,76 @@ form the task prompt.`,
 		agentName = args[0]
 		task := strings.Join(args[1:], " ")
 
-		fmt.Printf("Starting agent '%s' for task: %s\n", agentName, task)
+		// 0. Check if container already exists
+		rt := runtime.GetRuntime()
+		agents, err := rt.List(context.Background(), nil)
+		if err == nil {
+			for _, a := range agents {
+				if a.ID == agentName || a.Name == agentName {
+					if a.Status == "running" {
+						fmt.Printf("Agent container '%s' is already running.\n", agentName)
+						if attach {
+							fmt.Printf("Attaching to agent '%s'...\n", agentName)
+							return rt.Attach(context.Background(), a.ID)
+						}
+						return nil
+					}
+					// If it exists but not running, we should probably delete it or error
+					// since 'run' with a name usually fails if name is taken.
+					// For scion, let's follow the user's lead.
+					// If we want to "gracefully handle", maybe we delete and recreate if we're doing a 'start'?
+					// Or maybe just try to 'run' and let it fail if that's what's expected.
+					// Actually, the user said "start and run are really aliases as we will not be creating an actual runtime container in an unstarted state"
+					// This suggests if it exists but is not running, it might be in a weird state.
+					fmt.Printf("Agent container '%s' exists but is not running (Status: %s). Re-starting...\n", agentName, a.Status)
+					_ = rt.Delete(context.Background(), a.ID)
+				}
+			}
+		}
 
-		// 1. Prepare agent directories
-		var agentsDir string
 		projectDir, err := config.GetResolvedProjectDir(grovePath)
 		if err != nil {
 			return err
 		}
-
 		groveName := config.GetGroveName(projectDir)
-
-		// Verify .gitignore if in a repo
-		if util.IsGitRepo() {
-			// Find the projectDir relative to repo root if possible
-			root, err := util.RepoRoot()
-			if err == nil {
-				rel, err := filepath.Rel(root, projectDir)
-				if err == nil && !strings.HasPrefix(rel, "..") {
-					agentsPath := filepath.Join(rel, "agents")
-					if !util.IsIgnored(agentsPath + "/") {
-						return fmt.Errorf("security error: '%s/' must be in .gitignore when using a project-local grove", agentsPath)
-					}
-				}
-			}
-		}
-		agentsDir = filepath.Join(projectDir, "agents")
-
+		agentsDir := filepath.Join(projectDir, "agents")
 		agentDir := filepath.Join(agentsDir, agentName)
 		agentHome := filepath.Join(agentDir, "home")
 		agentWorkspace := filepath.Join(agentDir, "workspace")
 
-		if err := os.MkdirAll(agentHome, 0755); err != nil {
-			return fmt.Errorf("failed to create agent home: %w", err)
-		}
-
-		if util.IsGitRepo() {
-			fmt.Printf("Creating git worktree for agent '%s'...\n", agentName)
-			// Remove existing workspace dir if it exists to allow worktree add
-			os.RemoveAll(agentWorkspace)
-			if err := util.CreateWorktree(agentWorkspace, agentName); err != nil {
-				return fmt.Errorf("failed to create git worktree: %w", err)
-			}
-		} else {
-			if err := os.MkdirAll(agentWorkspace, 0755); err != nil {
-				return fmt.Errorf("failed to create agent workspace: %w", err)
-			}
-		}
-
-		// 2. Load and copy templates
-		chain, err := config.GetTemplateChain(templateName)
-		if err != nil {
-			return fmt.Errorf("failed to load template: %w", err)
-		}
-
-		// Track image from templates
-		resolvedImage := ""
 		var finalScionCfg *config.ScionConfig
 
-		for _, tpl := range chain {
-			fmt.Printf("Applying template: %s\n", tpl.Name)
-			if err := util.CopyDir(tpl.Path, agentHome); err != nil {
-				return fmt.Errorf("failed to copy template %s: %w", tpl.Name, err)
+		if _, err := os.Stat(agentDir); os.IsNotExist(err) {
+			fmt.Printf("Provisioning agent '%s'...\n", agentName)
+			var chain []*config.Template
+			agentHome, agentWorkspace, chain, err = ProvisionAgent(agentName, templateName, agentImage, grovePath)
+			if err != nil {
+				return err
 			}
-
-			// Load scion.json from this template to see if it specifies an image
-			tplCfg, err := tpl.LoadConfig()
-			if err == nil {
-				finalScionCfg = tplCfg
-				if tplCfg.Image != "" {
-					resolvedImage = tplCfg.Image
+			// Get the final config from the chain
+			for _, tpl := range chain {
+				tplCfg, err := tpl.LoadConfig()
+				if err == nil {
+					finalScionCfg = tplCfg
 				}
 			}
+		} else {
+			fmt.Printf("Using existing agent '%s'...\n", agentName)
+			// Load from existing agent's scion.json
+			tpl := &config.Template{Path: agentHome}
+			finalScionCfg, err = tpl.LoadConfig()
+			if err != nil {
+				return fmt.Errorf("failed to load agent config: %w", err)
+			}
 		}
 
-		// Update agent-specific scion.json
-		if finalScionCfg == nil {
-			finalScionCfg = &config.ScionConfig{}
-		}
-		finalScionCfg.Agent = &config.AgentConfig{
-			Grove: groveName,
-			Name:  agentName,
-		}
-		agentCfgData, _ := json.MarshalIndent(finalScionCfg, "", "  ")
-		os.WriteFile(filepath.Join(agentHome, "scion.json"), agentCfgData, 0644)
+		fmt.Printf("Starting agent '%s' for task: %s\n", agentName, task)
 
+		// Resolve image
+		resolvedImage := ""
+		if finalScionCfg != nil && finalScionCfg.Image != "" {
+			resolvedImage = finalScionCfg.Image
+		}
 		// Flag takes ultimate precedence
 		if agentImage != "" {
 			resolvedImage = agentImage
@@ -133,33 +117,30 @@ form the task prompt.`,
 		// 3. Propagate credentials
 		var auth config.AuthConfig
 		if !noAuth {
-			// Load agent settings from the newly prepared home directory
+			// Load agent settings from the home directory
 			agentSettingsPath := filepath.Join(agentHome, ".gemini", "settings.json")
 			agentSettings, _ := config.LoadGeminiSettings(agentSettingsPath)
 			auth = config.DiscoverAuth(agentSettings)
 		}
 
 		// 4. Launch container
-		rt := runtime.GetRuntime()
+		rt = runtime.GetRuntime()
 
-		// Determine detached mode, tmux, and username from templates (last one wins)
 		detached := true
 		useTmux := false
 		resolvedModel := "flash"
 		unixUsername := "node"
-		for _, tpl := range chain {
-			tplCfg, err := tpl.LoadConfig()
-			if err == nil {
-				detached = tplCfg.IsDetached()
-				if tplCfg.UseTmux {
-					useTmux = true
-				}
-				if tplCfg.Model != "" {
-					resolvedModel = tplCfg.Model
-				}
-				if tplCfg.UnixUsername != "" {
-					unixUsername = tplCfg.UnixUsername
-				}
+
+		if finalScionCfg != nil {
+			detached = finalScionCfg.IsDetached()
+			if finalScionCfg.UseTmux {
+				useTmux = true
+			}
+			if finalScionCfg.Model != "" {
+				resolvedModel = finalScionCfg.Model
+			}
+			if finalScionCfg.UnixUsername != "" {
+				unixUsername = finalScionCfg.UnixUsername
 			}
 		}
 
@@ -229,6 +210,7 @@ form the task prompt.`,
 		return nil
 	},
 }
+
 
 func init() {
 	rootCmd.AddCommand(startCmd)
