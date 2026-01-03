@@ -38,18 +38,35 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 	rt := runtime.GetRuntime(grovePath, effectiveRuntime)
 	mgr := agent.NewManager(rt)
 
+	// Check if already running and we want to attach
+	if attach {
+		agents, err := rt.List(context.Background(), map[string]string{"scion.name": agentName})
+		if err == nil {
+			for _, a := range agents {
+				if a.Name == agentName || a.ID == agentName || strings.TrimPrefix(a.Name, "/") == agentName {
+					status := strings.ToLower(a.ContainerStatus)
+					isRunning := strings.HasPrefix(status, "up") || status == "running"
+					if isRunning {
+						fmt.Printf("Agent '%s' is already running. Attaching...\n", agentName)
+						return rt.Attach(context.Background(), a.ID)
+					}
+				}
+			}
+		}
+	}
+
 	// Flag takes ultimate precedence
 	resolvedImage := agentImage
 
 	var detached *bool
-	if cmd.Flags().Changed("attach") {
-		val := !attach
+	if attach {
+		val := false
 		detached = &val
 	}
 
 	opts := api.StartOptions{
 		Name:      agentName,
-		Task:      task,
+		Task:      strings.TrimSpace(task),
 		Template:  templateName,
 		Profile:   effectiveProfile,
 		Image:     resolvedImage,

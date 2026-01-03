@@ -20,15 +20,20 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	if err == nil {
 		for _, a := range agents {
 			if a.ID == opts.Name || a.Name == opts.Name {
-				isRunning := (strings.HasPrefix(a.ContainerStatus, "Up") || a.ContainerStatus == "Running")
+				status := strings.ToLower(a.ContainerStatus)
+				isRunning := strings.HasPrefix(status, "up") || status == "running"
 				if isRunning {
-					a.Detached = true
-					if opts.Detached != nil {
-						a.Detached = *opts.Detached
+					// If a new task is provided, we might want to recreate even if running
+					// but if no task provided, we just return the running one
+					if opts.Task == "" {
+						a.Detached = true
+						if opts.Detached != nil {
+							a.Detached = *opts.Detached
+						}
+						return &a, nil
 					}
-					return &a, nil
 				}
-				// If it exists but not running, we delete it so we can recreate it
+				// If it exists but not running (or we have a new task), we delete it so we can recreate it
 				if err := m.Runtime.Delete(ctx, a.ID); err != nil {
 					return nil, fmt.Errorf("failed to cleanup existing container: %w", err)
 				}

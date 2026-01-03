@@ -38,7 +38,7 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				Image:        "scion-agent:latest",
 				Task:         "hello",
 			},
-			wantIn: []string{"run", "-d", "-i", "--name", "test-agent", "scion-agent:latest", "gemini", "hello"},
+			wantIn: []string{"run", "-d", "-i", "--name", "test-agent", "scion-agent:latest", "gemini", "--prompt-interactive", "hello"},
 		},
 		{
 			name: "workspace and home",
@@ -67,7 +67,8 @@ func TestBuildCommonRunArgs(t *testing.T) {
 				},
 				Image: "scion-agent:latest",
 			},
-			wantIn: []string{"-e", "GEMINI_API_KEY=sk-123", "-e", "GEMINI_DEFAULT_AUTH_TYPE=gemini-api-key"},
+			wantIn:  []string{"-e", "GEMINI_API_KEY=sk-123", "-e", "GEMINI_DEFAULT_AUTH_TYPE=gemini-api-key"},
+			wantOut: []string{"--prompt-interactive"},
 		},
 		{
 			name: "labels and tmux",
@@ -242,6 +243,18 @@ func TestBuildCommonRunArgs(t *testing.T) {
 					return h
 				}()),
 			},
+		},
+		{
+			name: "attach without task",
+			config: RunConfig{
+				Harness:      &harness.GeminiCLI{},
+				Name:         "test-agent",
+				UnixUsername: "scion",
+				Image:        "scion-agent:latest",
+				Task:         "",
+			},
+			wantIn:  []string{"gemini", "--yolo"},
+			wantOut: []string{"--prompt-interactive"},
 		},
 	}
 

@@ -111,7 +111,9 @@ func (g *GeminiCLI) GetCommand(task string, resume bool, baseArgs []string) []st
 		args = append(args, "--resume")
 	}
 	args = append(args, baseArgs...)
-	args = append(args, "--prompt-interactive", task)
+	if task != "" {
+		args = append(args, "--prompt-interactive", task)
+	}
 	return args
 }
 
