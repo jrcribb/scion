@@ -33,7 +33,7 @@ Scion uses `git worktree` to manage agent workspaces.
 You can install Scion directly using `go install`:
 
 ```bash
-go install github.com/ptone/scion-agent@latest
+go install github.com/ptone/scion-agent/cmd/scion@latest
 ```
 
 Ensure your `$GOPATH/bin` (typically `~/go/bin`) is in your system `$PATH`.

@@ -27,7 +27,7 @@ See the **[Installation Guide](docs/install.md)** for detailed instructions.
 
 Quick start from source:
 ```bash
-go install github.com/ptone/scion-agent@latest
+go install github.com/ptone/scion-agent/cmd/scion@latest
 ```
 
 ## Quick Start
