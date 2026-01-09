@@ -36,4 +36,6 @@ func init() {
 
 	startCmd.Flags().StringVarP(&branch, "branch", "b", "", "Git branch to use for the agent workspace")
 
+	startCmd.Flags().StringVar(&workdir, "workdir", "", "Host path to mount as /workspace (non-git environments only)")
+
 }

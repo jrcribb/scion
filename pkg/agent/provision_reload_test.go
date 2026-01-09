@@ -41,7 +41,7 @@ func TestProvisionAgentReloadsConfig(t *testing.T) {
 	// The default "gemini" template uses "gemini" harness and default "gemini-api-key" auth type.
 	// The GeminiCLI harness injects GEMINI_API_KEY=${GEMINI_API_KEY} into scion-agent.json during Provision.
 	agentName := "reload-test-agent"
-	_, _, cfg, err := ProvisionAgent(context.Background(), agentName, "gemini", "", projectScionDir, "", "", "")
+	_, _, cfg, err := ProvisionAgent(context.Background(), agentName, "gemini", "", projectScionDir, "", "", "", "")
 	if err != nil {
 		t.Fatalf("ProvisionAgent failed: %v", err)
 	}

@@ -60,7 +60,7 @@ func TestProvisionAgentHomeCopy(t *testing.T) {
 
 	// Provision agent
 	agentName := "test-agent"
-	agentHome, _, _, err := ProvisionAgent(context.Background(), agentName, "test-tpl", "", projectScionDir, "", "", "")
+	agentHome, _, _, err := ProvisionAgent(context.Background(), agentName, "test-tpl", "", projectScionDir, "", "", "", "")
 	if err != nil {
 		t.Fatalf("ProvisionAgent failed: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestProvisionAgentLegacyTemplateCleanup(t *testing.T) {
 
 	// Provision agent
 	agentName := "legacy-agent"
-	agentHome, _, _, err := ProvisionAgent(context.Background(), agentName, "legacy-tpl", "", projectScionDir, "", "", "")
+	agentHome, _, _, err := ProvisionAgent(context.Background(), agentName, "legacy-tpl", "", projectScionDir, "", "", "", "")
 	if err != nil {
 		t.Fatalf("ProvisionAgent failed: %v", err)
 	}

@@ -50,14 +50,14 @@ func DeleteAgentFiles(agentName string, grovePath string, removeBranch bool) (bo
 }
 
 func (m *AgentManager) Provision(ctx context.Context, opts api.StartOptions) (*api.ScionConfig, error) {
-	_, _, _, cfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.GrovePath, opts.Profile, "created", opts.Branch)
+	_, _, _, cfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.GrovePath, opts.Profile, "created", opts.Branch, opts.Workdir)
 	if err == nil {
 		_ = UpdateAgentConfig(opts.Name, opts.GrovePath, "created", m.Runtime.Name(), opts.Profile, "")
 	}
 	return cfg, err
 }
 
-func ProvisionAgent(ctx context.Context, agentName string, templateName string, agentImage string, grovePath string, profileName string, optionalStatus string, branch string) (string, string, *api.ScionConfig, error) {
+func ProvisionAgent(ctx context.Context, agentName string, templateName string, agentImage string, grovePath string, profileName string, optionalStatus string, branch string, workdir string) (string, string, *api.ScionConfig, error) {
 	// 1. Prepare agent directories
 	projectDir, err := config.GetResolvedProjectDir(grovePath)
 	if err != nil {
@@ -73,6 +73,9 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 
 	// Verify .gitignore if in a repo
 	if util.IsGitRepo() {
+		if workdir != "" {
+			return "", "", nil, fmt.Errorf("--workdir cannot be used when in a git repository")
+		}
 		// Find the projectDir relative to repo root if possible
 		root, err := util.RepoRoot()
 		if err == nil {
@@ -184,7 +187,13 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 	// For non-git repos, add a volume mount for the project root to /workspace
 	if !util.IsGitRepo() {
 		var workspaceSource string
-		if groveName == "global" {
+		if workdir != "" {
+			var err error
+			workspaceSource, err = filepath.Abs(workdir)
+			if err != nil {
+				return "", "", nil, fmt.Errorf("failed to resolve absolute path for workdir %s: %w", workdir, err)
+			}
+		} else if groveName == "global" {
 			workspaceSource, _ = os.Getwd()
 		} else {
 			workspaceSource = filepath.Dir(projectDir)
@@ -343,7 +352,7 @@ func UpdateAgentConfig(agentName string, grovePath string, status string, runtim
 	return nil
 }
 
-func GetAgent(ctx context.Context, agentName string, templateName string, agentImage string, grovePath string, profileName string, optionalStatus string, branch string) (string, string, string, *api.ScionConfig, error) {
+func GetAgent(ctx context.Context, agentName string, templateName string, agentImage string, grovePath string, profileName string, optionalStatus string, branch string, workdir string) (string, string, string, *api.ScionConfig, error) {
 	projectDir, err := config.GetResolvedProjectDir(grovePath)
 	if err != nil {
 		return "", "", "", nil, err
@@ -374,7 +383,7 @@ func GetAgent(ctx context.Context, agentName string, templateName string, agentI
 		if templateName == "" {
 			templateName = defaultTemplate
 		}
-		home, ws, cfg, err := ProvisionAgent(ctx, agentName, templateName, agentImage, grovePath, profileName, optionalStatus, branch)
+		home, ws, cfg, err := ProvisionAgent(ctx, agentName, templateName, agentImage, grovePath, profileName, optionalStatus, branch, workdir)
 		return agentDir, home, ws, cfg, err
 	}
 
