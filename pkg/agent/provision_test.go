@@ -161,3 +161,97 @@ func TestProvisionGeminiAgentSettings(t *testing.T) {
 		t.Errorf("expected selectedType gemini-api-key, got %v", auth["selectedType"])
 	}
 }
+
+func TestProvisionAgentNonGitWorkspace(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Move to tmpDir to avoid being inside the project's git repo
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	// Mock HOME
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	// Project-local grove
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	if err := config.InitProject(projectScionDir); err != nil {
+		t.Fatalf("InitProject failed: %v", err)
+	}
+
+	// Change into projectDir so FindTemplate (via GetProjectDir) finds it
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+
+	evalProjectDir, _ := filepath.EvalSymlinks(projectDir)
+
+	agentName := "test-agent"
+	home, ws, cfg, err := ProvisionAgent(context.Background(), agentName, "gemini", "", projectScionDir, "", "", "")
+	if err != nil {
+		t.Fatalf("ProvisionAgent failed: %v", err)
+	}
+
+	if ws != "" {
+		t.Errorf("expected empty workspace path for non-git agent, got %q", ws)
+	}
+
+	if home == "" {
+		t.Error("expected non-empty home path")
+	}
+
+	// Check volumes in cfg
+	found := false
+	for _, v := range cfg.Volumes {
+		if v.Target == "/workspace" {
+			found = true
+			evalSource, _ := filepath.EvalSymlinks(v.Source)
+			if evalSource != evalProjectDir {
+				t.Errorf("expected volume source %q, got %q", evalProjectDir, evalSource)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected /workspace volume mount not found in config")
+	}
+
+	// Global grove
+	if err := config.InitGlobal(); err != nil {
+		t.Fatalf("InitGlobal failed: %v", err)
+	}
+	globalScionDir, _ := config.GetGlobalDir()
+
+	// Change into a subdirectory to act as CWD
+	cwd := filepath.Join(tmpDir, "some-dir")
+	os.MkdirAll(cwd, 0755)
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	evalCWD, _ := filepath.EvalSymlinks(cwd)
+
+	_, ws, cfg, err = ProvisionAgent(context.Background(), "global-agent", "gemini", "", globalScionDir, "", "", "")
+	if err != nil {
+		t.Fatalf("ProvisionAgent failed for global grove: %v", err)
+	}
+
+	if ws != "" {
+		t.Errorf("expected empty workspace path for global agent, got %q", ws)
+	}
+
+	found = false
+	for _, v := range cfg.Volumes {
+		if v.Target == "/workspace" {
+			found = true
+			evalSource, _ := filepath.EvalSymlinks(v.Source)
+			if evalSource != evalCWD {
+				t.Errorf("expected global agent volume source %q (CWD), got %q", evalCWD, evalSource)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected /workspace volume mount not found in global agent config")
+	}
+}

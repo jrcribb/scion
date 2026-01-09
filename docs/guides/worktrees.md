@@ -15,9 +15,40 @@ To use Scion's worktree features, you must have a modern version of Git installe
 
 Scion detects if your current project is a Git repository.
 - **Inside a Git Repo**: Scion automatically creates a git worktree for the agent's workspace.
-- **Outside a Git Repo**: Scion simply creates a standard directory for the workspace.
+- **Outside a Git Repo**: Scion mounts the project root (the directory containing your `.scion` grove) directly into the container as `/workspace`.
 
-This behavior is automatic and requires no configuration.
+This behavior is automatic and ensures that agents always have access to your code, regardless of whether you use Git.
+
+## Non-Git Projects
+
+When working in a project that is not a Git repository, Scion provides access to your code by bind-mounting your project root directly.
+
+### Workspace Behavior
+
+In a non-git project:
+1. **Direct Mount**: Instead of creating an isolated copy of your files, Scion mounts the host project directory directly into the container's `/workspace`.
+2. **Shared Access**: Unlike Git worktrees (which provide isolated branches), all agents in a non-git project share the **same host files**.
+3. **Global Groves**: If you are using a global grove (e.g., in your home directory), Scion mounts the **current working directory** (where you ran `scion start`) as the workspace.
+
+### Configuration
+
+This behavior is configured during the provisioning phase. You can see the mount configuration in the agent's `scion-agent.json` file:
+
+```json
+"volumes": [
+  {
+    "source": "/Users/you/dev/my-project",
+    "target": "/workspace",
+    "read_only": false
+  }
+]
+```
+
+### Constraints
+
+- **Lack of Isolation**: Because agents share the same filesystem on the host, they can interfere with each other if they modify the same files simultaneously.
+- **No Branching**: There is no concept of branches or automatic conflict resolution in non-git projects.
+- **Recursive Logs**: Since the `.scion` directory is often inside the mounted project root, you should ensure your agent's tools (like grep or search) are configured to ignore the `.scion` folder to avoid analyzing the agent's own internal state.
 
 ### Worktree Location
 

@@ -54,6 +54,16 @@ func (r *KubernetesRuntime) Run(ctx context.Context, config RunConfig) (string, 
 		config.Name = fmt.Sprintf("scion-%d", time.Now().UnixNano())
 	}
 
+	// For non-git environments, Workspace might be empty but we might have it as a volume mount
+	if config.Workspace == "" {
+		for _, v := range config.Volumes {
+			if v.Target == "/workspace" {
+				config.Workspace = v.Source
+				break
+			}
+		}
+	}
+
 	// Persist workspace path in annotations for later sync
 	if config.Workspace != "" {
 		if config.Annotations == nil {

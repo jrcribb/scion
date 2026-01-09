@@ -257,6 +257,42 @@ func TestBuildCommonRunArgs(t *testing.T) {
 			wantIn:  []string{"gemini", "--yolo"},
 			wantOut: []string{"--prompt-interactive"},
 		},
+		{
+			name: "workspace from volumes",
+			config: RunConfig{
+				Harness:      &harness.GeminiCLI{},
+				Name:         "test-agent",
+				UnixUsername: "scion",
+				Image:        "scion-agent:latest",
+				Volumes: []api.VolumeMount{
+					{Source: "/host/project", Target: "/workspace", ReadOnly: false},
+				},
+			},
+			wantIn: []string{
+				"-v /host/project:/workspace",
+				"--workdir /workspace",
+			},
+		},
+		{
+			name: "workspace precedence over volumes",
+			config: RunConfig{
+				Harness:      &harness.GeminiCLI{},
+				Name:         "test-agent",
+				UnixUsername: "scion",
+				Image:        "scion-agent:latest",
+				Workspace:    "/dedicated/workspace",
+				Volumes: []api.VolumeMount{
+					{Source: "/host/project", Target: "/workspace", ReadOnly: false},
+				},
+			},
+			wantIn: []string{
+				"-v /dedicated/workspace:/workspace",
+				"--workdir /workspace",
+			},
+			wantOut: []string{
+				"-v /host/project:/workspace",
+			},
+		},
 	}
 
 		for _, tt := range tests {

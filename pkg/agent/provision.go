@@ -119,9 +119,9 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 			return "", "", nil, fmt.Errorf("failed to create git worktree: %w", err)
 		}
 	} else {
-		if err := os.MkdirAll(agentWorkspace, 0755); err != nil {
-			return "", "", nil, fmt.Errorf("failed to create agent workspace: %w", err)
-		}
+		// In a non-git environment, we don't use a local workspace directory.
+		// Instead, we will mount the project root directly via scion-agent.json volumes.
+		agentWorkspace = ""
 	}
 
 	// 2. Load and copy templates
@@ -178,6 +178,24 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 			// Template has highest priority, so it should override settings.
 			// We construct a config with ONLY the settings env, then merge finalScionCfg over it.
 			finalScionCfg = config.MergeScionConfig(settingsCfg, finalScionCfg)
+		}
+	}
+
+	// For non-git repos, add a volume mount for the project root to /workspace
+	if !util.IsGitRepo() {
+		var workspaceSource string
+		if groveName == "global" {
+			workspaceSource, _ = os.Getwd()
+		} else {
+			workspaceSource = filepath.Dir(projectDir)
+		}
+
+		if workspaceSource != "" {
+			finalScionCfg.Volumes = append(finalScionCfg.Volumes, api.VolumeMount{
+				Source:   workspaceSource,
+				Target:   "/workspace",
+				ReadOnly: false,
+			})
 		}
 	}
 
@@ -334,6 +352,13 @@ func GetAgent(ctx context.Context, agentName string, templateName string, agentI
 	agentDir := filepath.Join(agentsDir, agentName)
 	agentHome := filepath.Join(agentDir, "home")
 	agentWorkspace := filepath.Join(agentDir, "workspace")
+
+	// If we are resuming, and it's not a git repo, the physical workspace dir might not exist.
+	if _, err := os.Stat(filepath.Join(agentWorkspace, ".git")); err != nil {
+		if _, err := os.Stat(agentWorkspace); os.IsNotExist(err) {
+			agentWorkspace = ""
+		}
+	}
 
 	// Load settings for default template
 	settings, err := config.LoadSettings(projectDir)

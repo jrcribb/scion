@@ -47,50 +47,81 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 	volumeMap := make(map[string]string)
 	var volumeOrder []string
 
-	registerMount := func(src, tgt string, ro bool) {
+	registerMount := func(src, tgt string, ro bool, overwrite bool) {
 		val := fmt.Sprintf("%s:%s", src, tgt)
 		if ro {
 			val += ":ro"
 		}
 		if _, exists := volumeMap[tgt]; !exists {
 			volumeOrder = append(volumeOrder, tgt)
+			volumeMap[tgt] = val
+		} else if overwrite {
+			volumeMap[tgt] = val
 		}
-		volumeMap[tgt] = val
 	}
 
 	addVolume := func(v api.VolumeMount) {
 		src := expandPath(v.Source, false)
 		tgt := expandPath(v.Target, true)
-		registerMount(src, tgt, v.ReadOnly)
+		// Generic volumes from config should NOT overwrite already registered mounts (like workspace)
+		registerMount(src, tgt, v.ReadOnly, false)
 	}
 
 	addArg("--name", config.Name)
 
 	if config.HomeDir != "" {
-		registerMount(config.HomeDir, util.GetHomeDir(config.UnixUsername), false)
+		registerMount(config.HomeDir, util.GetHomeDir(config.UnixUsername), false, true)
 	}
 	if config.RepoRoot != "" && config.Workspace != "" {
 		relWorkspace, err := filepath.Rel(config.RepoRoot, config.Workspace)
 		if err == nil && !strings.HasPrefix(relWorkspace, "..") {
 			// Mount .git
-			registerMount(filepath.Join(config.RepoRoot, ".git"), "/repo-root/.git", false)
+			registerMount(filepath.Join(config.RepoRoot, ".git"), "/repo-root/.git", false, true)
 			// Mount workspace at same relative path
 			containerWorkspace := filepath.Join("/repo-root", relWorkspace)
-			registerMount(config.Workspace, containerWorkspace, false)
+			registerMount(config.Workspace, containerWorkspace, false, true)
 			addArg("--workdir", containerWorkspace)
 		} else {
 			// Fallback if workspace is outside repo root
-			registerMount(config.Workspace, "/workspace", false)
+			registerMount(config.Workspace, "/workspace", false, true)
 			addArg("--workdir", "/workspace")
 		}
 	} else if config.Workspace != "" {
-		registerMount(config.Workspace, "/workspace", false)
+		registerMount(config.Workspace, "/workspace", false, true)
 		addArg("--workdir", "/workspace")
 	}
 
-	// Add generic volumes from config
+	// Add generic volumes from config, deduplicating among themselves first
+	// but respecting already registered mounts.
+	dedupedVolumes := make(map[string]api.VolumeMount)
+	var dedupedOrder []string
 	for _, v := range config.Volumes {
-		addVolume(v)
+		tgt := expandPath(v.Target, true)
+		if _, exists := dedupedVolumes[tgt]; !exists {
+			dedupedOrder = append(dedupedOrder, tgt)
+		}
+		dedupedVolumes[tgt] = v
+	}
+	for _, tgt := range dedupedOrder {
+		addVolume(dedupedVolumes[tgt])
+	}
+
+	// If workdir was not set by the RepoRoot/Workspace logic above, check if we have an explicit
+	// volume mount for /workspace and if so set workdir to it.
+	workdirSet := false
+	for _, arg := range args {
+		if arg == "--workdir" {
+			workdirSet = true
+			break
+		}
+	}
+	if !workdirSet {
+		for _, v := range dedupedVolumes {
+			if expandPath(v.Target, true) == "/workspace" {
+				addArg("--workdir", "/workspace")
+				break
+			}
+		}
 	}
 
 	// Use Harness for file propagation and env
@@ -113,7 +144,7 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 	home, _ := os.UserHomeDir()
 	gcloudConfigDir := filepath.Join(home, ".config", "gcloud")
 	if _, err := os.Stat(gcloudConfigDir); err == nil {
-		registerMount(gcloudConfigDir, fmt.Sprintf("/home/%s/.config/gcloud", config.UnixUsername), true)
+		registerMount(gcloudConfigDir, fmt.Sprintf("/home/%s/.config/gcloud", config.UnixUsername), true, false)
 	}
 
 	for _, e := range config.Env {

@@ -33,18 +33,22 @@ Then checks for any git worktree checked out to the specified branch.`,
 			workspace := filepath.Join(agentDir, "workspace")
 			if _, err := os.Stat(workspace); err == nil {
 				targetPath = workspace
+			} else {
+				// Check for non-git workspace mount in scion-agent.json
+				targetPath = resolveAgentWorkspace(agentDir)
 			}
 		}
 
 		// Check global grove if not found
 		if targetPath == "" {
-			globalDir, _ := config.GetGlobalAgentsDir()
-			if globalDir != "" {
-				// globalDir is .../agents, so agent path is globalDir/name
-				agentDir := filepath.Join(globalDir, name)
+			globalAgentsDir, _ := config.GetGlobalAgentsDir()
+			if globalAgentsDir != "" {
+				agentDir := filepath.Join(globalAgentsDir, name)
 				workspace := filepath.Join(agentDir, "workspace")
 				if _, err := os.Stat(workspace); err == nil {
 					targetPath = workspace
+				} else {
+					targetPath = resolveAgentWorkspace(agentDir)
 				}
 			}
 		}
@@ -96,6 +100,23 @@ Then checks for any git worktree checked out to the specified branch.`,
 			os.Exit(1)
 		}
 	},
+}
+
+func resolveAgentWorkspace(agentDir string) string {
+	scionAgentPath := filepath.Join(agentDir, "scion-agent.json")
+	if _, err := os.Stat(scionAgentPath); err != nil {
+		return ""
+	}
+
+	tpl := &config.Template{Path: agentDir}
+	if cfg, err := tpl.LoadConfig(); err == nil {
+		for _, v := range cfg.Volumes {
+			if v.Target == "/workspace" {
+				return v.Source
+			}
+		}
+	}
+	return ""
 }
 
 func init() {
