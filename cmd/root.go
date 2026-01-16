@@ -25,6 +25,8 @@ var rootCmd = &cobra.Command{
 	Long: `Scion is a container-based orchestration tool for managing 
 concurrent LLM agents. It enables parallel execution of specialized 
 sub-agents with isolated identities, credentials, and workspaces.`,
+	SilenceErrors: true,
+	SilenceUsage:  true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		if globalMode && grovePath == "" {
 			grovePath = "global"
@@ -52,8 +54,12 @@ sub-agents with isolated identities, credentials, and workspaces.`,
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
 func Execute() {
-	err := rootCmd.Execute()
+	cmd, err := rootCmd.ExecuteC()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "\n%s%sError: %v%s\n\n", util.BgRed, util.Black, err, util.Reset)
+		if cmd != nil {
+			cmd.Usage()
+		}
 		os.Exit(1)
 	}
 }

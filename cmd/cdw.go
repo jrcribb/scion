@@ -20,7 +20,7 @@ First checks for an agent by name and enters its workspace if found.
 Then checks for any git worktree checked out to the specified branch.`,
 	Args:              cobra.ExactArgs(1),
 	ValidArgsFunction: getAgentNames,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		var targetPath string
 
@@ -58,14 +58,12 @@ Then checks for any git worktree checked out to the specified branch.`,
 
 		// Not found
 		if targetPath == "" {
-			fmt.Fprintf(os.Stderr, "Error: no agent worktree found for '%s'. 'cdw' is only valid for git-based agents that use worktrees for workspace isolation.\n", name)
-			os.Exit(1)
+			return fmt.Errorf("no agent worktree found for '%s'. 'cdw' is only valid for git-based agents that use worktrees for workspace isolation.", name)
 		}
 
 		// Change directory
 		if err := os.Chdir(targetPath); err != nil {
-			fmt.Fprintf(os.Stderr, "Error changing directory to '%s': %v\n", targetPath, err)
-			os.Exit(1)
+			return fmt.Errorf("error changing directory to '%s': %v", targetPath, err)
 		}
 
 		// Get shell
@@ -82,8 +80,7 @@ Then checks for any git worktree checked out to the specified branch.`,
 			} else if _, err := os.Stat("/bin/sh"); err == nil {
 				shellPath = "/bin/sh"
 			} else {
-				fmt.Fprintf(os.Stderr, "Error finding shell '%s': %v\n", shell, err)
-				os.Exit(1)
+				return fmt.Errorf("error finding shell '%s': %v", shell, err)
 			}
 		}
 
@@ -91,9 +88,9 @@ Then checks for any git worktree checked out to the specified branch.`,
 		// We use syscall.Exec to replace the current process with the shell
 		err = syscall.Exec(shellPath, []string{shell}, os.Environ())
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error executing shell '%s': %v\n", shellPath, err)
-			os.Exit(1)
+			return fmt.Errorf("error executing shell '%s': %v", shellPath, err)
 		}
+		return nil
 	},
 }
 

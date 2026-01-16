@@ -7,6 +7,7 @@ import (
 // ANSI Color codes
 const (
 	Reset  = "\033[0m"
+	Red    = "\033[31m"
 	Green  = "\033[32m"
 	LGreen = "\033[92m"
 	Brown  = "\033[33m" // ANSI yellow often serves as brown
@@ -15,6 +16,8 @@ const (
 	White  = "\033[97m"
 	Bold   = "\033[1m"
 	Blue   = "\033[34m"
+	Black  = "\033[30m"
+	BgRed  = "\033[41m"
 )
 
 // GetBanner returns the refined ASCII art banner
