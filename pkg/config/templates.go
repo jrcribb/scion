@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -68,7 +69,32 @@ func LoadProjectKubernetesConfig() (*api.KubernetesConfig, error) {
 }
 
 func FindTemplate(name string) (*Template, error) {
-	// 0. Check if name is an absolute path
+	return FindTemplateWithContext(context.Background(), name)
+}
+
+// FindTemplateWithContext finds a template by name, supporting remote URIs.
+// Remote templates are fetched and cached locally before being returned.
+func FindTemplateWithContext(ctx context.Context, name string) (*Template, error) {
+	// 0. Check if name is a remote URI (URL or rclone connection string)
+	if IsRemoteURI(name) {
+		// Validate the URI format
+		if err := ValidateRemoteURI(name); err != nil {
+			return nil, fmt.Errorf("invalid remote template URI: %w", err)
+		}
+
+		// Fetch the remote template to local cache
+		cachedPath, err := FetchRemoteTemplate(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch remote template: %w", err)
+		}
+
+		// Derive a short name from the URI for display purposes
+		shortName := deriveTemplateName(name)
+
+		return &Template{Name: shortName, Path: cachedPath}, nil
+	}
+
+	// 1. Check if name is an absolute path
 	if filepath.IsAbs(name) {
 		if info, err := os.Stat(name); err == nil && info.IsDir() {
 			return &Template{Name: filepath.Base(name), Path: name}, nil
@@ -76,7 +102,7 @@ func FindTemplate(name string) (*Template, error) {
 		return nil, fmt.Errorf("template path %s not found or not a directory", name)
 	}
 
-	// 1. Check project-local templates
+	// 2. Check project-local templates
 	projectTemplatesDir, err := GetProjectTemplatesDir()
 	if err == nil {
 		path := filepath.Join(projectTemplatesDir, name)
@@ -85,7 +111,7 @@ func FindTemplate(name string) (*Template, error) {
 		}
 	}
 
-	// 2. Check global templates
+	// 3. Check global templates
 	globalTemplatesDir, err := GetGlobalTemplatesDir()
 	if err == nil {
 		path := filepath.Join(globalTemplatesDir, name)
@@ -94,7 +120,55 @@ func FindTemplate(name string) (*Template, error) {
 		}
 	}
 
+	// TODO: Future enhancement - when operating with a remote hub system,
+	// simple template names could also be resolved to remote storage locations:
+	// <bucket-name>/<scion-prefix>/<grove-id>/templates/<template-name>
+	// This would enable shared templates across teams/organizations.
+
 	return nil, fmt.Errorf("template %s not found", name)
+}
+
+// deriveTemplateName extracts a short template name from a URI for display purposes.
+func deriveTemplateName(uri string) string {
+	// For GitHub URLs, extract the folder name
+	if parts, err := parseGitHubURL(uri); err == nil {
+		if parts.Path != "" {
+			// Return the last path component
+			pathParts := filepath.SplitList(parts.Path)
+			if len(pathParts) > 0 {
+				return filepath.Base(parts.Path)
+			}
+		}
+		return parts.Repo
+	}
+
+	// For archive URLs, extract filename without extension
+	if isArchiveURL(uri) {
+		base := filepath.Base(uri)
+		// Remove common extensions
+		for _, ext := range []string{".tar.gz", ".tgz", ".zip"} {
+			if len(base) > len(ext) && base[len(base)-len(ext):] == ext {
+				return base[:len(base)-len(ext)]
+			}
+		}
+		return base
+	}
+
+	// For rclone paths, use the last path component
+	if idx := len(uri) - 1; idx > 0 {
+		// Find the last slash
+		for i := len(uri) - 1; i >= 0; i-- {
+			if uri[i] == '/' {
+				if i < len(uri)-1 {
+					return uri[i+1:]
+				}
+				break
+			}
+		}
+	}
+
+	// Fallback: use "remote"
+	return "remote"
 }
 
 // GetTemplateChain returns a list of templates in inheritance order (base first)
