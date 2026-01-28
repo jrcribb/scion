@@ -13,11 +13,18 @@ import (
 	"github.com/ptone/scion-agent/pkg/util"
 )
 
+// AgentRef holds both name and ID for an agent.
+// Name is used for display, ID is used for API calls.
+type AgentRef struct {
+	Name string
+	ID   string
+}
+
 // SyncResult represents the result of comparing local and Hub agents.
 type SyncResult struct {
-	ToRegister []string // Local agents to register on Hub
-	ToRemove   []string // Hub agents (for this host) to remove
-	InSync     []string // Agents already in sync
+	ToRegister []string   // Local agents to register on Hub
+	ToRemove   []AgentRef // Hub agents (for this host) to remove (with IDs for API)
+	InSync     []string   // Agents already in sync
 }
 
 // IsInSync returns true if there are no agents to sync.
@@ -43,9 +50,9 @@ func (r *SyncResult) ExcludeAgent(agentName string) *SyncResult {
 		}
 	}
 
-	for _, name := range r.ToRemove {
-		if name != agentName {
-			result.ToRemove = append(result.ToRemove, name)
+	for _, ref := range r.ToRemove {
+		if ref.Name != agentName {
+			result.ToRemove = append(result.ToRemove, ref)
 		}
 	}
 
@@ -281,7 +288,7 @@ func CompareAgents(ctx context.Context, hubCtx *HubContext) (*SyncResult, error)
 	// Find agents to remove (on Hub for this host but not local)
 	for _, a := range resp.Agents {
 		if !localAgentMap[a.Name] {
-			result.ToRemove = append(result.ToRemove, a.Name)
+			result.ToRemove = append(result.ToRemove, AgentRef{Name: a.Name, ID: a.ID})
 		}
 	}
 
@@ -307,10 +314,10 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult) er
 	}
 
 	// Remove Hub agents that are not on this host
-	for _, name := range result.ToRemove {
-		fmt.Printf("Removing agent '%s' from Hub...\n", name)
-		if err := hubCtx.Client.Agents().Delete(ctxTimeout, name, nil); err != nil {
-			return fmt.Errorf("failed to remove agent '%s': %w", name, err)
+	for _, ref := range result.ToRemove {
+		fmt.Printf("Removing agent '%s' from Hub...\n", ref.Name)
+		if err := hubCtx.Client.Agents().Delete(ctxTimeout, ref.ID, nil); err != nil {
+			return fmt.Errorf("failed to remove agent '%s': %w", ref.Name, err)
 		}
 	}
 

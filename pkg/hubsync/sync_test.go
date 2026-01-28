@@ -43,7 +43,7 @@ func TestSyncResult_IsInSync(t *testing.T) {
 			name: "agents to remove",
 			result: SyncResult{
 				ToRegister: nil,
-				ToRemove:   []string{"old-agent"},
+				ToRemove:   []AgentRef{{Name: "old-agent", ID: "old-agent-id"}},
 				InSync:     []string{"agent1"},
 			},
 			expected: false,
@@ -52,7 +52,7 @@ func TestSyncResult_IsInSync(t *testing.T) {
 			name: "both register and remove",
 			result: SyncResult{
 				ToRegister: []string{"new-agent"},
-				ToRemove:   []string{"old-agent"},
+				ToRemove:   []AgentRef{{Name: "old-agent", ID: "old-agent-id"}},
 				InSync:     nil,
 			},
 			expected: false,
@@ -176,7 +176,7 @@ func TestSyncResult_ExcludeAgent(t *testing.T) {
 			name: "exclude agent from ToRegister",
 			result: SyncResult{
 				ToRegister: []string{"agent1", "agent2"},
-				ToRemove:   []string{},
+				ToRemove:   []AgentRef{},
 				InSync:     []string{"agent3"},
 			},
 			excludeAgent:   "agent1",
@@ -188,7 +188,7 @@ func TestSyncResult_ExcludeAgent(t *testing.T) {
 			name: "exclude agent from ToRemove",
 			result: SyncResult{
 				ToRegister: []string{},
-				ToRemove:   []string{"agent1", "agent2"},
+				ToRemove:   []AgentRef{{Name: "agent1", ID: "id1"}, {Name: "agent2", ID: "id2"}},
 				InSync:     []string{"agent3"},
 			},
 			excludeAgent:   "agent1",
@@ -200,7 +200,7 @@ func TestSyncResult_ExcludeAgent(t *testing.T) {
 			name: "exclude only agent in ToRegister makes it in sync",
 			result: SyncResult{
 				ToRegister: []string{"agent1"},
-				ToRemove:   []string{},
+				ToRemove:   []AgentRef{},
 				InSync:     []string{"agent2"},
 			},
 			excludeAgent:   "agent1",
@@ -212,7 +212,7 @@ func TestSyncResult_ExcludeAgent(t *testing.T) {
 			name: "exclude only agent in ToRemove makes it in sync",
 			result: SyncResult{
 				ToRegister: []string{},
-				ToRemove:   []string{"agent1"},
+				ToRemove:   []AgentRef{{Name: "agent1", ID: "id1"}},
 				InSync:     []string{"agent2"},
 			},
 			excludeAgent:   "agent1",
@@ -224,7 +224,7 @@ func TestSyncResult_ExcludeAgent(t *testing.T) {
 			name: "exclude agent from both lists",
 			result: SyncResult{
 				ToRegister: []string{"agent1"},
-				ToRemove:   []string{"agent1"}, // unlikely but test the logic
+				ToRemove:   []AgentRef{{Name: "agent1", ID: "id1"}}, // unlikely but test the logic
 				InSync:     []string{},
 			},
 			excludeAgent:   "agent1",
@@ -236,7 +236,7 @@ func TestSyncResult_ExcludeAgent(t *testing.T) {
 			name: "exclude non-existent agent has no effect",
 			result: SyncResult{
 				ToRegister: []string{"agent1"},
-				ToRemove:   []string{"agent2"},
+				ToRemove:   []AgentRef{{Name: "agent2", ID: "id2"}},
 				InSync:     []string{},
 			},
 			excludeAgent:   "agent3",
@@ -248,7 +248,7 @@ func TestSyncResult_ExcludeAgent(t *testing.T) {
 			name: "empty exclude agent has no effect",
 			result: SyncResult{
 				ToRegister: []string{"agent1"},
-				ToRemove:   []string{"agent2"},
+				ToRemove:   []AgentRef{{Name: "agent2", ID: "id2"}},
 				InSync:     []string{},
 			},
 			excludeAgent:   "",
