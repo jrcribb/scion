@@ -320,8 +320,8 @@ export class ScionPageGroveDetail extends LitElement {
     try {
       // Load grove and agents in parallel
       const [groveResponse, agentsResponse] = await Promise.all([
-        fetch(`/api/groves/${this.groveId}`),
-        fetch(`/api/groves/${this.groveId}/agents`),
+        fetch(`/api/groves/${this.groveId}`, { credentials: 'include' }),
+        fetch(`/api/groves/${this.groveId}/agents`, { credentials: 'include' }),
       ]);
 
       if (!groveResponse.ok) {
@@ -391,17 +391,26 @@ export class ScionPageGroveDetail extends LitElement {
 
       switch (action) {
         case 'start':
-          response = await fetch(`/api/agents/${agentId}/start`, { method: 'POST' });
+          response = await fetch(`/api/agents/${agentId}/start`, {
+            method: 'POST',
+            credentials: 'include',
+          });
           break;
         case 'stop':
-          response = await fetch(`/api/agents/${agentId}/stop`, { method: 'POST' });
+          response = await fetch(`/api/agents/${agentId}/stop`, {
+            method: 'POST',
+            credentials: 'include',
+          });
           break;
         case 'delete':
           if (!confirm('Are you sure you want to delete this agent?')) {
             this.actionLoading = { ...this.actionLoading, [agentId]: false };
             return;
           }
-          response = await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+          response = await fetch(`/api/agents/${agentId}`, {
+            method: 'DELETE',
+            credentials: 'include',
+          });
           break;
       }
 

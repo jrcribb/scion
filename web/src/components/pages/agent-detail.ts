@@ -339,7 +339,9 @@ export class ScionPageAgentDetail extends LitElement {
     this.error = null;
 
     try {
-      const agentResponse = await fetch(`/api/agents/${this.agentId}`);
+      const agentResponse = await fetch(`/api/agents/${this.agentId}`, {
+        credentials: 'include',
+      });
 
       if (!agentResponse.ok) {
         const errorData = (await agentResponse.json().catch(() => ({}))) as { message?: string };
@@ -353,7 +355,9 @@ export class ScionPageAgentDetail extends LitElement {
       // Try to load grove info
       if (this.agent.groveId) {
         try {
-          const groveResponse = await fetch(`/api/groves/${this.agent.groveId}`);
+          const groveResponse = await fetch(`/api/groves/${this.agent.groveId}`, {
+            credentials: 'include',
+          });
           if (groveResponse.ok) {
             this.grove = (await groveResponse.json()) as Grove;
           }
@@ -409,17 +413,26 @@ export class ScionPageAgentDetail extends LitElement {
 
       switch (action) {
         case 'start':
-          response = await fetch(`/api/agents/${this.agentId}/start`, { method: 'POST' });
+          response = await fetch(`/api/agents/${this.agentId}/start`, {
+            method: 'POST',
+            credentials: 'include',
+          });
           break;
         case 'stop':
-          response = await fetch(`/api/agents/${this.agentId}/stop`, { method: 'POST' });
+          response = await fetch(`/api/agents/${this.agentId}/stop`, {
+            method: 'POST',
+            credentials: 'include',
+          });
           break;
         case 'delete':
           if (!confirm('Are you sure you want to delete this agent?')) {
             this.actionLoading = false;
             return;
           }
-          response = await fetch(`/api/agents/${this.agentId}`, { method: 'DELETE' });
+          response = await fetch(`/api/agents/${this.agentId}`, {
+            method: 'DELETE',
+            credentials: 'include',
+          });
           break;
       }
 

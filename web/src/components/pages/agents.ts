@@ -215,7 +215,9 @@ export class ScionPageAgents extends LitElement {
     this.error = null;
 
     try {
-      const response = await fetch('/api/agents');
+      const response = await fetch('/api/agents', {
+        credentials: 'include',
+      });
 
       if (!response.ok) {
         const errorData = (await response.json().catch(() => ({}))) as { message?: string };
@@ -258,17 +260,26 @@ export class ScionPageAgents extends LitElement {
 
       switch (action) {
         case 'start':
-          response = await fetch(`/api/agents/${agentId}/start`, { method: 'POST' });
+          response = await fetch(`/api/agents/${agentId}/start`, {
+            method: 'POST',
+            credentials: 'include',
+          });
           break;
         case 'stop':
-          response = await fetch(`/api/agents/${agentId}/stop`, { method: 'POST' });
+          response = await fetch(`/api/agents/${agentId}/stop`, {
+            method: 'POST',
+            credentials: 'include',
+          });
           break;
         case 'delete':
           if (!confirm('Are you sure you want to delete this agent?')) {
             this.actionLoading = { ...this.actionLoading, [agentId]: false };
             return;
           }
-          response = await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+          response = await fetch(`/api/agents/${agentId}`, {
+            method: 'DELETE',
+            credentials: 'include',
+          });
           break;
       }
 
