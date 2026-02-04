@@ -5,6 +5,7 @@ set -euo pipefail
 
 INSTANCE_NAME="scion-demo"
 SERVICE_ACCOUNT_NAME="scion-demo-sa"
+FIREWALL_RULE="scion-demo-allow-http-https"
 REGION="us-central1"
 ZONE="us-central1-a"
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
@@ -32,6 +33,13 @@ function delete_resources() {
         gcloud iam service-accounts delete "${SERVICE_ACCOUNT_EMAIL}" --quiet
     else
         echo "Service account ${SERVICE_ACCOUNT_EMAIL} not found."
+    fi
+
+    if gcloud compute firewall-rules describe "${FIREWALL_RULE}" &>/dev/null; then
+        echo "Deleting firewall rule ${FIREWALL_RULE}..."
+        gcloud compute firewall-rules delete "${FIREWALL_RULE}" --quiet
+    else
+        echo "Firewall rule ${FIREWALL_RULE} not found."
     fi
     
     echo "=== Deletion Complete ==="
@@ -85,8 +93,22 @@ if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT_EMAIL}" &>/dev/null
     gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
         --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
         --role "roles/storage.objectAdmin" > /dev/null
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+        --role "roles/dns.admin" > /dev/null
 else
     echo "Service account ${SERVICE_ACCOUNT_NAME} already exists."
+fi
+
+# Create Firewall Rule if it doesn't exist
+if ! gcloud compute firewall-rules describe "${FIREWALL_RULE}" &>/dev/null; then
+    echo "Creating firewall rule ${FIREWALL_RULE}..."
+    gcloud compute firewall-rules create "${FIREWALL_RULE}" \
+        --allow=tcp:80,tcp:443 \
+        --target-tags=https-server \
+        --description="Allow HTTP and HTTPS traffic for Scion Demo"
+else
+    echo "Firewall rule ${FIREWALL_RULE} already exists."
 fi
 
 # Create Instance
@@ -110,7 +132,6 @@ echo "=== Success ==="
 echo "Instance ${INSTANCE_NAME} is being provisioned."
 echo "Cloud-init is running to install dependencies. This may take a few minutes."
 echo "You can check progress by SSHing into the machine and running: tail -f /var/log/cloud-init-output.log"
-echo "To allow HTTPS traffic, ensure you have a firewall rule for tag 'https-server'."
 
 echo ""
 echo "To delete this deployment, run: $0 delete"

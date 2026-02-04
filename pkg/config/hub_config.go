@@ -31,6 +31,9 @@ type HubServerConfig struct {
 	CORSAllowedMethods []string `json:"corsAllowedMethods" yaml:"corsAllowedMethods" koanf:"corsAllowedMethods"`
 	CORSAllowedHeaders []string `json:"corsAllowedHeaders" yaml:"corsAllowedHeaders" koanf:"corsAllowedHeaders"`
 	CORSMaxAge         int      `json:"corsMaxAge" yaml:"corsMaxAge" koanf:"corsMaxAge"`
+
+	// AdminEmails is a list of email addresses to auto-promote to admin role.
+	AdminEmails []string `json:"adminEmails" yaml:"adminEmails" koanf:"adminEmails"`
 }
 
 // RuntimeHostConfig holds configuration for the Runtime Host API server.
@@ -151,6 +154,7 @@ func DefaultGlobalConfig() GlobalConfig {
 			CORSAllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 			CORSAllowedHeaders: []string{"Authorization", "Content-Type", "X-Scion-Host-Token", "X-Scion-Agent-Token", "X-API-Key"},
 			CORSMaxAge:         3600,
+			AdminEmails:        []string{},
 		},
 		RuntimeHost: RuntimeHostConfig{
 			Enabled:      false,
@@ -296,9 +300,13 @@ func LoadGlobalConfig(configPath string) (*GlobalConfig, error) {
 		}
 	}
 
-	// Handle SCION_AUTHORIZED_DOMAINS env var (shorthand for SCION_SERVER_AUTH_AUTHORIZEDDOMAINS)
-	if domains := os.Getenv("SCION_AUTHORIZED_DOMAINS"); domains != "" {
-		config.Auth.AuthorizedDomains = parseCommaSeparatedList(domains)
+	// Fixup for list fields that might be loaded as a single comma-separated string from env vars.
+	// This happens because koanf's env provider doesn't automatically split strings for slice fields.
+	if len(config.Hub.AdminEmails) == 1 && strings.Contains(config.Hub.AdminEmails[0], ",") {
+		config.Hub.AdminEmails = parseCommaSeparatedList(config.Hub.AdminEmails[0])
+	}
+	if len(config.Auth.AuthorizedDomains) == 1 && strings.Contains(config.Auth.AuthorizedDomains[0], ",") {
+		config.Auth.AuthorizedDomains = parseCommaSeparatedList(config.Auth.AuthorizedDomains[0])
 	}
 
 	return config, nil
@@ -339,6 +347,7 @@ func envKeyToConfigKey(envKey string) string {
 		"loglevel":          "logLevel",
 		"logformat":         "logFormat",
 		"authorizeddomains": "authorizedDomains",
+		"adminemails":       "adminEmails",
 	}
 
 	// Split by underscore, convert each part

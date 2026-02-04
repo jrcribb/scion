@@ -165,6 +165,86 @@ func TestLoadGlobalConfigEnvOverride(t *testing.T) {
 	}
 }
 
+func TestLoadGlobalConfigAdminEmailsEnvOverride(t *testing.T) {
+	// Test standard SCION_SERVER_HUB_ADMINEMAILS
+	os.Setenv("SCION_SERVER_HUB_ADMINEMAILS", "admin1@example.com,admin2@example.com")
+	defer os.Unsetenv("SCION_SERVER_HUB_ADMINEMAILS")
+
+	cfg, err := LoadGlobalConfig("")
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	expected := []string{"admin1@example.com", "admin2@example.com"}
+	if len(cfg.Hub.AdminEmails) != len(expected) {
+		t.Errorf("expected %d admin emails, got %d. Values: %v", len(expected), len(cfg.Hub.AdminEmails), cfg.Hub.AdminEmails)
+	} else {
+		for i, email := range cfg.Hub.AdminEmails {
+			if email != expected[i] {
+				t.Errorf("expected admin email %d to be %q, got %q", i, expected[i], email)
+			}
+		}
+	}
+
+	// Unset to test shorthand removal
+	os.Unsetenv("SCION_SERVER_HUB_ADMINEMAILS")
+
+	// Verify that the old SCION_ADMIN_EMAILS no longer works
+	os.Setenv("SCION_ADMIN_EMAILS", "old@example.com")
+	defer os.Unsetenv("SCION_ADMIN_EMAILS")
+
+	cfg, err = LoadGlobalConfig("")
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	for _, email := range cfg.Hub.AdminEmails {
+		if email == "old@example.com" {
+			t.Errorf("SCION_ADMIN_EMAILS should no longer be supported")
+		}
+	}
+}
+
+func TestLoadGlobalConfigAuthorizedDomainsEnvOverride(t *testing.T) {
+	// Test standard SCION_SERVER_AUTH_AUTHORIZEDDOMAINS
+	os.Setenv("SCION_SERVER_AUTH_AUTHORIZEDDOMAINS", "example.com,test.org")
+	defer os.Unsetenv("SCION_SERVER_AUTH_AUTHORIZEDDOMAINS")
+
+	cfg, err := LoadGlobalConfig("")
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	expected := []string{"example.com", "test.org"}
+	if len(cfg.Auth.AuthorizedDomains) != len(expected) {
+		t.Errorf("expected %d domains, got %d. Values: %v", len(expected), len(cfg.Auth.AuthorizedDomains), cfg.Auth.AuthorizedDomains)
+	} else {
+		for i, domain := range cfg.Auth.AuthorizedDomains {
+			if domain != expected[i] {
+				t.Errorf("expected domain %d to be %q, got %q", i, expected[i], domain)
+			}
+		}
+	}
+
+	// Unset to test shorthand removal
+	os.Unsetenv("SCION_SERVER_AUTH_AUTHORIZEDDOMAINS")
+
+	// Verify that the old SCION_AUTHORIZED_DOMAINS no longer works
+	os.Setenv("SCION_AUTHORIZED_DOMAINS", "old.com")
+	defer os.Unsetenv("SCION_AUTHORIZED_DOMAINS")
+
+	cfg, err = LoadGlobalConfig("")
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	for _, domain := range cfg.Auth.AuthorizedDomains {
+		if domain == "old.com" {
+			t.Errorf("SCION_AUTHORIZED_DOMAINS should no longer be supported")
+		}
+	}
+}
+
 func TestEnvKeyToConfigKey(t *testing.T) {
 	tests := []struct {
 		input    string

@@ -299,6 +299,11 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 					adminEmailList = append(adminEmailList, email)
 				}
 			}
+		} else if len(cfg.Hub.AdminEmails) > 0 {
+			adminEmailList = cfg.Hub.AdminEmails
+		}
+
+		if len(adminEmailList) > 0 {
 			log.Printf("Admin emails configured: %v", adminEmailList)
 		}
 
