@@ -110,7 +110,7 @@ func TestHTTPAgentDispatcher_DispatchAgentCreate(t *testing.T) {
 	ctx := context.Background()
 	memStore := createTestStore(t)
 
-	// Create a runtime host with an endpoint
+	// Create a runtime broker with an endpoint
 	broker := &store.RuntimeBroker{
 		ID:       "host-1",
 		Name:     "test-host",
@@ -119,7 +119,7 @@ func TestHTTPAgentDispatcher_DispatchAgentCreate(t *testing.T) {
 		Status:   store.BrokerStatusOnline,
 	}
 	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	mockClient := &mockRuntimeBrokerClient{}
@@ -160,7 +160,7 @@ func TestHTTPAgentDispatcher_DispatchAgentStop(t *testing.T) {
 		Status:   store.BrokerStatusOnline,
 	}
 	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	mockClient := &mockRuntimeBrokerClient{}
@@ -196,7 +196,7 @@ func TestHTTPAgentDispatcher_DispatchAgentDelete(t *testing.T) {
 		Status:   store.BrokerStatusOnline,
 	}
 	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	mockClient := &mockRuntimeBrokerClient{}
@@ -235,7 +235,7 @@ func TestHTTPAgentDispatcher_DispatchAgentMessage(t *testing.T) {
 		Status:   store.BrokerStatusOnline,
 	}
 	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	mockClient := &mockRuntimeBrokerClient{}

@@ -22,7 +22,7 @@ type Client interface {
 	// Groves returns the grove operations interface.
 	Groves() GroveService
 
-	// RuntimeHosts returns the runtime host operations interface.
+	// RuntimeHosts returns the runtime broker operations interface.
 	RuntimeBrokers() RuntimeBrokerService
 
 	// Templates returns the template operations interface.
@@ -101,7 +101,7 @@ func (c *client) Groves() GroveService {
 	return c.groves
 }
 
-// RuntimeHosts returns the runtime host operations interface.
+// RuntimeHosts returns the runtime broker operations interface.
 func (c *client) RuntimeBrokers() RuntimeBrokerService {
 	return c.runtimeHosts
 }
@@ -233,7 +233,7 @@ func WithAutoDevAuth() Option {
 }
 
 // WithHMACAuth sets HMAC-based host authentication.
-// This is used by Runtime Hosts to authenticate with the Hub using
+// This is used by Runtime Brokers to authenticate with the Hub using
 // the shared secret established during the join process.
 func WithHMACAuth(brokerID string, secretKey []byte) Option {
 	return func(c *client) {

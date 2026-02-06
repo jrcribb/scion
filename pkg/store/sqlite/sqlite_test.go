@@ -719,7 +719,7 @@ func TestGroveContributors(t *testing.T) {
 	assert.Len(t, contributors, 2)
 
 	// Get host groves
-	groves, err := s.GetHostGroves(ctx, broker1.ID)
+	groves, err := s.GetBrokerGroves(ctx, broker1.ID)
 	require.NoError(t, err)
 	assert.Len(t, groves, 1)
 	assert.Equal(t, grove.ID, groves[0].GroveID)
@@ -740,7 +740,7 @@ func TestGroveContributors(t *testing.T) {
 	// Verify grove's active host count
 	retrievedGrove, err := s.GetGrove(ctx, grove.ID)
 	require.NoError(t, err)
-	assert.Equal(t, 1, retrievedGrove.ActiveHostCount) // Only broker2 is online
+	assert.Equal(t, 1, retrievedGrove.ActiveBrokerCount) // Only broker2 is online
 
 	// Remove contributor
 	err = s.RemoveGroveContributor(ctx, grove.ID, broker1.ID)

@@ -17,13 +17,13 @@ import (
 )
 
 // HTTPRuntimeBrokerClient is an HTTP-based implementation of RuntimeBrokerClient.
-// It communicates with remote runtime hosts via their REST API.
+// It communicates with remote runtime brokers via their REST API.
 type HTTPRuntimeBrokerClient struct {
 	client *http.Client
 	debug  bool
 }
 
-// NewHTTPRuntimeBrokerClient creates a new HTTP runtime host client.
+// NewHTTPRuntimeBrokerClient creates a new HTTP runtime broker client.
 func NewHTTPRuntimeBrokerClient() *HTTPRuntimeBrokerClient {
 	return &HTTPRuntimeBrokerClient{
 		client: &http.Client{
@@ -32,7 +32,7 @@ func NewHTTPRuntimeBrokerClient() *HTTPRuntimeBrokerClient {
 	}
 }
 
-// NewHTTPRuntimeBrokerClientWithDebug creates a new HTTP runtime host client with debug logging.
+// NewHTTPRuntimeBrokerClientWithDebug creates a new HTTP runtime broker client with debug logging.
 func NewHTTPRuntimeBrokerClientWithDebug(debug bool) *HTTPRuntimeBrokerClient {
 	return &HTTPRuntimeBrokerClient{
 		client: &http.Client{
@@ -42,7 +42,7 @@ func NewHTTPRuntimeBrokerClientWithDebug(debug bool) *HTTPRuntimeBrokerClient {
 	}
 }
 
-// CreateAgent creates an agent on a remote runtime host.
+// CreateAgent creates an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client but is part of the
 // RuntimeBrokerClient interface for compatibility with AuthenticatedHostClient.
 func (c *HTTPRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
@@ -72,7 +72,7 @@ func (c *HTTPRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, hos
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result RemoteAgentResponse
@@ -83,7 +83,7 @@ func (c *HTTPRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, hos
 	return &result, nil
 }
 
-// StartAgent starts an agent on a remote runtime host.
+// StartAgent starts an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	_ = brokerID // Unused in unauthenticated client
@@ -106,13 +106,13 @@ func (c *HTTPRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, host
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
 }
 
-// StopAgent stops an agent on a remote runtime host.
+// StopAgent stops an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	_ = brokerID // Unused in unauthenticated client
@@ -135,13 +135,13 @@ func (c *HTTPRuntimeBrokerClient) StopAgent(ctx context.Context, brokerID, hostE
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
 }
 
-// RestartAgent restarts an agent on a remote runtime host.
+// RestartAgent restarts an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	_ = brokerID // Unused in unauthenticated client
@@ -164,13 +164,13 @@ func (c *HTTPRuntimeBrokerClient) RestartAgent(ctx context.Context, brokerID, ho
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
 }
 
-// DeleteAgent deletes an agent from a remote runtime host.
+// DeleteAgent deletes an agent from a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
 	_ = brokerID // Unused in unauthenticated client
@@ -194,13 +194,13 @@ func (c *HTTPRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, hos
 
 	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
 }
 
-// MessageAgent sends a message to an agent on a remote runtime host.
+// MessageAgent sends a message to an agent on a remote runtime broker.
 // Note: brokerID is unused in this unauthenticated client.
 func (c *HTTPRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
 	_ = brokerID // Unused in unauthenticated client
@@ -232,7 +232,7 @@ func (c *HTTPRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, ho
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
@@ -243,8 +243,8 @@ type AgentTokenGenerator interface {
 	GenerateAgentToken(agentID, groveID string) (string, error)
 }
 
-// HTTPAgentDispatcher dispatches agent operations to remote runtime hosts via HTTP.
-// It looks up the runtime host endpoint from the store and uses HTTPRuntimeBrokerClient
+// HTTPAgentDispatcher dispatches agent operations to remote runtime brokers via HTTP.
+// It looks up the runtime broker endpoint from the store and uses HTTPRuntimeBrokerClient
 // to make the actual API calls.
 type HTTPAgentDispatcher struct {
 	store          store.Store
@@ -282,11 +282,11 @@ func (d *HTTPAgentDispatcher) SetHubEndpoint(endpoint string) {
 	d.hubEndpoint = endpoint
 }
 
-// getHostEndpoint retrieves the endpoint URL for a runtime host.
+// getHostEndpoint retrieves the endpoint URL for a runtime broker.
 func (d *HTTPAgentDispatcher) getHostEndpoint(ctx context.Context, brokerID string) (string, error) {
 	broker, err := d.store.GetRuntimeBroker(ctx, brokerID)
 	if err != nil {
-		return "", fmt.Errorf("failed to get runtime host: %w", err)
+		return "", fmt.Errorf("failed to get runtime broker: %w", err)
 	}
 
 	if broker.Endpoint == "" {
@@ -298,10 +298,10 @@ func (d *HTTPAgentDispatcher) getHostEndpoint(ctx context.Context, brokerID stri
 	return broker.Endpoint, nil
 }
 
-// DispatchAgentCreate creates an agent on the runtime host.
+// DispatchAgentCreate creates an agent on the runtime broker.
 func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *store.Agent) error {
 	if agent.RuntimeBrokerID == "" {
-		return fmt.Errorf("agent has no runtime host assigned")
+		return fmt.Errorf("agent has no runtime broker assigned")
 	}
 
 	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
@@ -309,7 +309,7 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 		return err
 	}
 
-	// Look up the local path for this grove on the target runtime host
+	// Look up the local path for this grove on the target runtime broker
 	var grovePath string
 	if agent.GroveID != "" && agent.RuntimeBrokerID != "" {
 		contrib, err := d.store.GetGroveContributor(ctx, agent.GroveID, agent.RuntimeBrokerID)
@@ -390,10 +390,10 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 	return nil
 }
 
-// DispatchAgentStart starts an agent on the runtime host.
+// DispatchAgentStart starts an agent on the runtime broker.
 func (d *HTTPAgentDispatcher) DispatchAgentStart(ctx context.Context, agent *store.Agent) error {
 	if agent.RuntimeBrokerID == "" {
-		return fmt.Errorf("agent has no runtime host assigned")
+		return fmt.Errorf("agent has no runtime broker assigned")
 	}
 
 	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
@@ -401,14 +401,14 @@ func (d *HTTPAgentDispatcher) DispatchAgentStart(ctx context.Context, agent *sto
 		return err
 	}
 
-	// Use agent name as identifier (runtime host uses name or ID)
+	// Use agent name as identifier (runtime broker uses name or ID)
 	return d.client.StartAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name)
 }
 
-// DispatchAgentStop stops an agent on the runtime host.
+// DispatchAgentStop stops an agent on the runtime broker.
 func (d *HTTPAgentDispatcher) DispatchAgentStop(ctx context.Context, agent *store.Agent) error {
 	if agent.RuntimeBrokerID == "" {
-		return fmt.Errorf("agent has no runtime host assigned")
+		return fmt.Errorf("agent has no runtime broker assigned")
 	}
 
 	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
@@ -419,10 +419,10 @@ func (d *HTTPAgentDispatcher) DispatchAgentStop(ctx context.Context, agent *stor
 	return d.client.StopAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name)
 }
 
-// DispatchAgentRestart restarts an agent on the runtime host.
+// DispatchAgentRestart restarts an agent on the runtime broker.
 func (d *HTTPAgentDispatcher) DispatchAgentRestart(ctx context.Context, agent *store.Agent) error {
 	if agent.RuntimeBrokerID == "" {
-		return fmt.Errorf("agent has no runtime host assigned")
+		return fmt.Errorf("agent has no runtime broker assigned")
 	}
 
 	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
@@ -433,10 +433,10 @@ func (d *HTTPAgentDispatcher) DispatchAgentRestart(ctx context.Context, agent *s
 	return d.client.RestartAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name)
 }
 
-// DispatchAgentDelete deletes an agent from the runtime host.
+// DispatchAgentDelete deletes an agent from the runtime broker.
 func (d *HTTPAgentDispatcher) DispatchAgentDelete(ctx context.Context, agent *store.Agent, deleteFiles, removeBranch bool) error {
 	if agent.RuntimeBrokerID == "" {
-		return fmt.Errorf("agent has no runtime host assigned")
+		return fmt.Errorf("agent has no runtime broker assigned")
 	}
 
 	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
@@ -447,10 +447,10 @@ func (d *HTTPAgentDispatcher) DispatchAgentDelete(ctx context.Context, agent *st
 	return d.client.DeleteAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name, deleteFiles, removeBranch)
 }
 
-// DispatchAgentMessage sends a message to an agent on the runtime host.
+// DispatchAgentMessage sends a message to an agent on the runtime broker.
 func (d *HTTPAgentDispatcher) DispatchAgentMessage(ctx context.Context, agent *store.Agent, message string, interrupt bool) error {
 	if agent.RuntimeBrokerID == "" {
-		return fmt.Errorf("agent has no runtime host assigned")
+		return fmt.Errorf("agent has no runtime broker assigned")
 	}
 
 	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)

@@ -1,15 +1,15 @@
-# Runtime Host Authentication Design
+# Runtime Broker Authentication Design
 
 ## Status
 **Phase 4 Implemented** (Production Hardening)
 
 ## 1. Overview
 
-This document specifies how Runtime Hosts authenticate with the Scion Hub using HMAC-based request signing. Runtime Hosts are compute nodes that execute agents on behalf of the Hub, and require a secure bidirectional authentication mechanism distinct from user/agent authentication.
+This document specifies how Runtime Brokers authenticate with the Scion Hub using HMAC-based request signing. Runtime Brokers are compute nodes that execute agents on behalf of the Hub, and require a secure bidirectional authentication mechanism distinct from user/agent authentication.
 
 ### 1.1 Relationship to Server Auth
 
-The Hub's unified authentication middleware (see [server-auth-design.md](server-auth-design.md)) handles user, agent, and API key authentication. Runtime Host authentication is a **separate pathway** that:
+The Hub's unified authentication middleware (see [server-auth-design.md](server-auth-design.md)) handles user, agent, and API key authentication. Runtime Broker authentication is a **separate pathway** that:
 
 - Uses HMAC signatures rather than bearer tokens
 - Authenticates infrastructure components, not users or agents
@@ -20,11 +20,11 @@ The Hub's unified authentication middleware (see [server-auth-design.md](server-
 |---------------------|-----------------|-----------|---------|
 | User (Web/CLI) | JWT Bearer | Client → Hub | User API access |
 | Agent (sciontool) | JWT Bearer | Agent → Hub | Agent status updates |
-| **Runtime Host** | **HMAC Signature** | **Bidirectional** | **Host ↔ Hub trust** |
+| **Runtime Broker** | **HMAC Signature** | **Bidirectional** | **Host ↔ Hub trust** |
 
 ### 1.2 Goals
 
-1. **Mutual Authentication** - Both Hub and Runtime Host can verify each other's identity
+1. **Mutual Authentication** - Both Hub and Runtime Broker can verify each other's identity
 2. **Replay Prevention** - Timestamped, nonce-protected requests prevent replay attacks
 3. **Secure Bootstrap** - One-time secret exchange with user authorization
 4. **Minimal Exposure** - Shared secret never transmitted after initial registration
@@ -44,7 +44,7 @@ The Hub's unified authentication middleware (see [server-auth-design.md](server-
 
 ```
 ┌─────────────────┐                    ┌─────────────────┐
-│   Scion Hub     │◄──── HTTPS ────────│  Runtime Host   │
+│   Scion Hub     │◄──── HTTPS ────────│  Runtime Broker   │
 │                 │      (HMAC)        │                 │
 │  ┌───────────┐  │                    │  ┌───────────┐  │
 │  │ Secret    │  │                    │  │ Secret    │  │
@@ -65,7 +65,7 @@ All HMAC-authenticated requests include these headers:
 
 | Header | Format | Description |
 |--------|--------|-------------|
-| `X-Scion-Broker-ID` | UUID or slug | Unique identifier for the Runtime Host |
+| `X-Scion-Broker-ID` | UUID or slug | Unique identifier for the Runtime Broker |
 | `X-Scion-Timestamp` | RFC 3339 | Request timestamp (e.g., `2025-01-30T12:00:00Z`) |
 | `X-Scion-Nonce` | Base64 (16 bytes) | Random nonce for replay prevention |
 | `X-Scion-Signature` | Base64 (32 bytes) | HMAC-SHA256 signature |
@@ -80,11 +80,11 @@ Before HMAC authentication can work, both parties need a shared secret. This is 
 
 ```
 ┌──────────────┐        ┌──────────────┐        ┌─────────────┐
-│  Admin User  │        │ Runtime Host │        │     Hub     │
+│  Admin User  │        │ Runtime Broker │        │     Hub     │
 │   (CLI/Web)  │        │              │        │             │
 └──────────────┘        └──────────────┘        └─────────────┘
        │                       │                       │
-       │ POST /api/v1/hosts    │                       │
+       │ POST /api/v1/brokers    │                       │
        │ (with user token)     │                       │
        │──────────────────────────────────────────────►│
        │                       │                       │
@@ -94,7 +94,7 @@ Before HMAC authentication can work, both parties need a shared secret. This is 
        │ Provide joinToken     │                       │
        │──────────────────────►│                       │
        │                       │                       │
-       │                       │ POST /api/v1/hosts/join
+       │                       │ POST /api/v1/brokers/join
        │                       │ { hostId, joinToken, publicInfo }
        │                       │──────────────────────►│
        │                       │                       │
@@ -113,22 +113,22 @@ Before HMAC authentication can work, both parties need a shared secret. This is 
    - User receives the join token to provide to the host operator
 
 2. **Host Join (Host-Initiated)**
-   - The Runtime Host sends its `joinToken` to the Hub's bootstrap endpoint
+   - The Runtime Broker sends its `joinToken` to the Hub's bootstrap endpoint
    - This must occur over HTTPS
    - Host includes public metadata (hostname, profiles, version)
 
 3. **Secret Exchange**
    - Hub generates a high-entropy secret key ($K_s$) using `crypto/rand`
    - Hub stores `hash($K_s$)` associated with the `hostId`
-   - Hub returns $K_s$ to the Runtime Host (one-time transmission)
-   - Runtime Host stores $K_s$ in local secure storage
+   - Hub returns $K_s$ to the Runtime Broker (one-time transmission)
+   - Runtime Broker stores $K_s$ in local secure storage
 
 ### 3.3 Simplified CLI Registration
 
-In the common case where a user is logged into the Runtime Host machine and already authenticated with the Hub, the registration flow can be streamlined via the CLI:
+In the common case where a user is logged into the Runtime Broker machine and already authenticated with the Hub, the registration flow can be streamlined via the CLI:
 
 ```bash
-# User runs this on the Runtime Host machine
+# User runs this on the Runtime Broker machine
 scion hub hosts join --name "production-host-1" --profiles local,shared-k8s
 ```
 
@@ -136,16 +136,16 @@ For defaults it should use the host info in `~/.scion/`
 
 This command orchestrates the full registration flow:
 
-1. **Creates Host Record** - Calls `POST /api/v1/hosts` using the user's existing Hub credentials
+1. **Creates Host Record** - Calls `POST /api/v1/brokers` using the user's existing Hub credentials
 2. **Extracts Join Token** - Receives the `joinToken` from the response
-3. **Completes Join** - Immediately calls `POST /api/v1/hosts/join` with the token
+3. **Completes Join** - Immediately calls `POST /api/v1/brokers/join` with the token
 4. **Stores Credentials** - Saves the returned secret to local credential storage
 
-The Runtime Host API exposes a `JoinHub` method that performs steps 3-4:
+The Runtime Broker API exposes a `JoinHub` method that performs steps 3-4:
 
 ```go
-// pkg/runtimehost/api.go
-func (h *RuntimeHost) JoinHub(ctx context.Context, hostID, joinToken string) error
+// pkg/runtimebroker/api.go
+func (h *RuntimeBroker) JoinHub(ctx context.Context, hostID, joinToken string) error
 ```
 
 For remote or headless hosts where the user cannot run commands directly, the manual two-step flow (user creates host, operator provides join token) remains available.
@@ -153,7 +153,7 @@ For remote or headless hosts where the user cannot run commands directly, the ma
 ### 3.4 Hub Endpoints
 
 ```
-POST /api/v1/hosts
+POST /api/v1/brokers
 Authorization: Bearer <user-token>
 Request:
 {
@@ -171,7 +171,7 @@ Response:
 ```
 
 ```
-POST /api/v1/hosts/join
+POST /api/v1/brokers/join
 Request:
 {
   "hostId": "host-uuid-123",
@@ -197,8 +197,8 @@ Response:
 - Keep plaintext secret only in memory during validation
 - Support secret rotation with grace period
 
-**Runtime Host Side:**
-- Initial: JSON file at `~/.scion/host-credentials.json` (mode 0600)
+**Runtime Broker Side:**
+- Initial: JSON file at `~/.scion/broker-credentials.json` (mode 0600)
 - Production: Google Secret Manager or HashiCorp Vault
 - Structure:
   ```json
@@ -214,7 +214,7 @@ Response:
 
 ## 4. Phase 2: Ongoing Authentication (Request Signing)
 
-Once registered, all requests between Runtime Host and Hub are HMAC-signed.
+Once registered, all requests between Runtime Broker and Hub are HMAC-signed.
 
 ### 4.1 Signing Process (Sender)
 
@@ -373,19 +373,19 @@ func computeHMAC(secret, data []byte) []byte {
 
 ## 5. Bidirectional Authentication
 
-Because both the Hub and Runtime Host possess $K_s$, either party can initiate authenticated requests.
+Because both the Hub and Runtime Broker possess $K_s$, either party can initiate authenticated requests.
 
-### 5.1 Runtime Host → Hub
+### 5.1 Runtime Broker → Hub
 
-The Runtime Host communicates with the Hub for host-level operations:
+The Runtime Broker communicates with the Hub for host-level operations:
 - Host heartbeat and health status
 - Host resource availability (CPU, memory, disk)
 - Agent lifecycle events (started, stopped, crashed)
 - Grove registration updates
 
-> **Note:** Agent-level status updates (thinking, executing, waiting for input) are sent directly by sciontool running *inside* the agent container using agent JWT authentication, not by the Runtime Host. See [sciontool-auth.md](sciontool-auth.md) for agent authentication.
+> **Note:** Agent-level status updates (thinking, executing, waiting for input) are sent directly by sciontool running *inside* the agent container using agent JWT authentication, not by the Runtime Broker. See [sciontool-auth.md](sciontool-auth.md) for agent authentication.
 
-### 5.2 Hub → Runtime Host
+### 5.2 Hub → Runtime Broker
 
 The Hub can push commands to registered hosts:
 - Agent provisioning requests
@@ -393,7 +393,7 @@ The Hub can push commands to registered hosts:
 - Configuration updates
 - Secret rotation notifications
 
-**Runtime Host Endpoints:**
+**Runtime Broker Endpoints:**
 ```
 POST /api/v1/agents/provision   # Start a new agent
 DELETE /api/v1/agents/{id}      # Stop an agent
@@ -403,7 +403,7 @@ POST /api/v1/secrets/rotate     # Accept new secret
 
 ### 5.3 Host Endpoint Security
 
-Runtime Hosts must:
+Runtime Brokers must:
 1. Bind to localhost or private network only (not public internet)
 2. Validate Hub signatures using the same HMAC mechanism
 3. Verify the requesting Hub matches the registered `hubEndpoint`
@@ -418,7 +418,7 @@ Secrets should be rotated periodically or on security events.
 
 ```
 ┌─────────────┐                    ┌──────────────┐
-│     Hub     │                    │ Runtime Host │
+│     Hub     │                    │ Runtime Broker │
 └─────────────┘                    └──────────────┘
        │                                  │
        │ POST /api/v1/secrets/rotate      │
@@ -478,14 +478,14 @@ server:
       length: 32  # bytes
 ```
 
-### 7.2 Runtime Host Configuration
+### 7.2 Runtime Broker Configuration
 
 ```yaml
 host:
   hub:
     endpoint: "https://hub.scion.example.com"
   credentials:
-    file: "~/.scion/host-credentials.json"
+    file: "~/.scion/broker-credentials.json"
     # OR for production:
     # secretManager: "projects/my-project/secrets/scion-host-secret"
   api:
@@ -510,7 +510,7 @@ host:
 
 ### 8.3 Clock Synchronization
 
-- Both Hub and Runtime Hosts should use NTP
+- Both Hub and Runtime Brokers should use NTP
 - 5-minute skew tolerance accommodates minor drift
 - Larger skew may indicate MITM or misconfiguration
 
@@ -546,7 +546,7 @@ None pending.
 
 ### 10.1 Registration Authorization
 
-**Question:** What permission level should be required to register a new Runtime Host?
+**Question:** What permission level should be required to register a new Runtime Broker?
 
 - **Option A:** Admin-only (restrictive)
 - **Option B:** New "host-manager" role
@@ -622,7 +622,7 @@ Arguments for per-message signing:
 
 ### 10.7 Multi-Hub Support
 
-**Question:** Can a Runtime Host be registered with multiple Hubs?
+**Question:** Can a Runtime Broker be registered with multiple Hubs?
 
 - If yes, how are secrets managed per-Hub?
 - What prevents Hub A from impersonating Hub B?
@@ -667,7 +667,7 @@ Options:
 **Decision:** Hub includes pre-signed agent JWT in the provision request payload.
 
 Rationale:
-- Runtime Hosts operate at a higher trust level than individual agents
+- Runtime Brokers operate at a higher trust level than individual agents
 - The trust model assumes hosts will not abuse access to agent credentials
 - Pre-signed tokens eliminate a round-trip and simplify agent startup
 - Agent tokens are scoped to specific agent IDs, limiting blast radius if compromised
@@ -692,37 +692,37 @@ Rationale:
 - Secret keys are 256-bit (32 bytes) generated via `crypto/rand`
 - Database migration V8 adds `host_secrets` and `host_join_tokens` tables with FK cascade delete
 
-### Phase 2: Runtime Host Integration ✓
+### Phase 2: Runtime Broker Integration ✓
 - [x] Add HMAC signing to `hubclient` package (`pkg/apiclient/hmac.go`, `hubclient.WithHMACAuth()`)
-- [x] Implement local credential storage (`pkg/hostcredentials/store.go`)
-- [x] Add host-side signature verification (`pkg/runtimehost/hostauth.go`)
-- [x] Implement heartbeat/status reporting (`pkg/runtimehost/heartbeat.go`)
+- [x] Implement local credential storage (`pkg/brokercredentials/store.go`)
+- [x] Add host-side signature verification (`pkg/runtimebroker/hostauth.go`)
+- [x] Implement heartbeat/status reporting (`pkg/runtimebroker/heartbeat.go`)
 
 **Implementation Notes (Phase 2):**
 - `HMACAuth` implements `apiclient.Authenticator` for signing outgoing requests
 - `BuildCanonicalString` and `ComputeHMAC` are exported for use by both client and server
-- `HostCredentials` stored in `~/.scion/host-credentials.json` with 0600 permissions
+- `HostCredentials` stored in `~/.scion/broker-credentials.json` with 0600 permissions
 - `HeartbeatService` runs background goroutine sending heartbeats at configurable interval (default 30s)
 - `HostAuthMiddleware` verifies incoming Hub requests using shared secret
 - Server integration loads credentials on startup and configures HMAC auth automatically
 
 ### Phase 3: Bidirectional Communication ✓
-- [x] Add Hub→Host HTTP client with HMAC signing (`pkg/hub/hostclient.go`)
-- [x] Update RuntimeHostClient interface to include hostID (`pkg/hub/server.go`)
+- [x] Add Hub→Host HTTP client with HMAC signing (`pkg/hub/brokerclient.go`)
+- [x] Update RuntimeBrokerClient interface to include hostID (`pkg/hub/server.go`)
 - [x] Update HTTPAgentDispatcher to pass hostID for auth (`pkg/hub/httpdispatcher.go`)
-- [x] Add strict mode config for Runtime Host (`pkg/runtimehost/server.go`)
+- [x] Add strict mode config for Runtime Broker (`pkg/runtimebroker/server.go`)
 
 **Implementation Notes (Phase 3):**
 - `AuthenticatedHostClient` wraps HTTP client with HMAC signing using `apiclient.HMACAuth`
-- `RuntimeHostClient` interface methods now take `hostID` as first parameter after `ctx`
-- `HTTPRuntimeHostClient` ignores hostID (for backward compatibility), `AuthenticatedHostClient` uses it for secret lookup
+- `RuntimeBrokerClient` interface methods now take `hostID` as first parameter after `ctx`
+- `HTTPRuntimeBrokerClient` ignores hostID (for backward compatibility), `AuthenticatedHostClient` uses it for secret lookup
 - `CreateAuthenticatedDispatcher()` helper on Hub Server creates dispatcher with authenticated client
-- `HostAuthStrictMode` config on Runtime Host: when true, requires all requests to be authenticated; when false (default), allows unauthenticated requests during transition
+- `HostAuthStrictMode` config on Runtime Broker: when true, requires all requests to be authenticated; when false (default), allows unauthenticated requests during transition
 - Graceful degradation: if secret lookup fails, request proceeds without signature (logged as warning)
 
 ### Phase 4: Production Hardening ✓
 - [x] Enable nonce cache by default (`pkg/hub/hostauth.go` - `EnableNonceCache: true`)
-- [x] Implement secret rotation flow (`POST /api/v1/hosts/{id}/rotate-secret`)
+- [x] Implement secret rotation flow (`POST /api/v1/brokers/{id}/rotate-secret`)
 - [x] Add dual-secret validation support (`GetActiveSecrets`, `ValidateHostSignatureWithRotation`)
 - [ ] Add Google Secret Manager integration (deferred - local file storage sufficient for now)
 - [x] Add comprehensive audit logging (`pkg/hub/audit.go`)
@@ -732,7 +732,7 @@ Rationale:
 - Nonce cache now enabled by default in `DefaultHostAuthConfig()` for replay attack prevention
 - `RotateHostSecret()` generates new secret and updates existing record; full dual-secret with schema migration deferred
 - `GetActiveSecrets()` returns both active and deprecated secrets for grace period validation
-- Rotation endpoint at `POST /api/v1/hosts/{id}/rotate-secret` allows admin or host self-rotation
+- Rotation endpoint at `POST /api/v1/brokers/{id}/rotate-secret` allows admin or host self-rotation
 - `LogAuditLogger` logs to standard logger; implements `AuditLogger` interface for custom backends
 - `AuditableHostAuthMiddleware` wraps auth with audit logging for success/failure events
 - Helper functions: `LogRegistrationEvent`, `LogJoinEvent`, `LogRotateEvent` for handler integration
@@ -748,4 +748,4 @@ Rationale:
 - [Auth Overview](auth-overview.md) - Identity model and token types
 - [Agent Authentication](sciontool-auth.md) - Agent-to-Hub JWT
 - [Hosted Architecture](../hosted-architecture.md) - System context
-- [RuntimeHost Websockets](../runtimehost-websocket.md) - Runtimehost websocket architecture details
+- [RuntimeBroker Websockets](../runtimebroker-websocket.md) - Runtimehost websocket architecture details

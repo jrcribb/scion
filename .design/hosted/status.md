@@ -14,11 +14,11 @@ This document provides an analysis of the hosted architecture implementation, co
 | Component | Design Doc | Implementation | Status |
 |-----------|------------|----------------|--------|
 | **Hub API Server** | `hub-api.md` | `pkg/hub/server.go` | ✅ Complete |
-| **Runtime Host API** | `runtime-host-api.md` | `pkg/runtimehost/server.go` | ✅ Complete |
+| **Runtime Broker API** | `runtime-broker-api.md` | `pkg/runtimebroker/server.go` | ✅ Complete |
 | **Store Layer** | `server-implementation-design.md` | `pkg/store/` | ✅ Complete |
 | **SQLite Store** | `server-implementation-design.md` | `pkg/store/sqlite/` | ✅ Complete |
 | **Hub Client Library** | `client-design.md` | `pkg/hubclient/` | ✅ Complete |
-| **Host Client Library** | `client-design.md` | `pkg/hostclient/` | ✅ Complete |
+| **Host Client Library** | `client-design.md` | `pkg/brokerclient/` | ✅ Complete |
 | **Dev Auth** | `dev-auth.md` | `pkg/apiclient/devauth.go` | ✅ Complete |
 | **Server CLI** | - | `cmd/server.go` | ✅ Complete |
 | **Hub CLI** | - | `cmd/hub.go` | ✅ Complete |
@@ -40,11 +40,11 @@ This document provides an analysis of the hosted architecture implementation, co
 | `GET /api/v1/groves/:id` | ✅ | Get grove |
 | `PATCH /api/v1/groves/:id` | ✅ | Update grove |
 | `DELETE /api/v1/groves/:id` | ✅ | Delete grove |
-| `GET /api/v1/runtime-hosts` | ✅ | List hosts |
-| `POST /api/v1/runtime-hosts` | ✅ | Register host |
-| `GET /api/v1/runtime-hosts/:id` | ✅ | Get host |
-| `PATCH /api/v1/runtime-hosts/:id` | ✅ | Update host |
-| `DELETE /api/v1/runtime-hosts/:id` | ✅ | Deregister host |
+| `GET /api/v1/runtime-brokers` | ✅ | List hosts |
+| `POST /api/v1/runtime-brokers` | ✅ | Register host |
+| `GET /api/v1/runtime-brokers/:id` | ✅ | Get host |
+| `PATCH /api/v1/runtime-brokers/:id` | ✅ | Update host |
+| `DELETE /api/v1/runtime-brokers/:id` | ✅ | Deregister host |
 | `GET /api/v1/templates` | ✅ | List templates |
 | `POST /api/v1/templates` | ✅ | Create template |
 | `GET /api/v1/templates/:id` | ✅ | Get template |
@@ -59,7 +59,7 @@ This document provides an analysis of the hosted architecture implementation, co
 | `POST /api/v1/secrets` | ✅ | Set secret |
 | `DELETE /api/v1/secrets/:key` | ✅ | Delete secret |
 
-#### Runtime Host API (`pkg/runtimehost/`)
+#### Runtime Broker API (`pkg/runtimebroker/`)
 
 | Endpoint | Handlers | Notes |
 |----------|----------|-------|
@@ -81,7 +81,7 @@ All store interfaces defined in `pkg/store/store.go`:
 |-------|-----------|-------------|-------|
 | `AgentStore` | ✅ | ✅ | CRUD + filtering by grove/host/status |
 | `GroveStore` | ✅ | ✅ | CRUD + unique remote URL |
-| `RuntimeHostStore` | ✅ | ✅ | CRUD + filtering by grove |
+| `RuntimeBrokerStore` | ✅ | ✅ | CRUD + filtering by grove |
 | `TemplateStore` | ✅ | ✅ | CRUD with unique name |
 | `UserStore` | ✅ | ✅ | CRUD + lookup by external ID |
 | `GroveContributorStore` | ✅ | ✅ | Many-to-many grove/user |
@@ -96,14 +96,14 @@ All store interfaces defined in `pkg/store/store.go`:
 |---------|----------------|-------|
 | `AgentsService` | ✅ | Full CRUD |
 | `GrovesService` | ✅ | Full CRUD |
-| `RuntimeHostsService` | ✅ | Full CRUD |
+| `RuntimeBrokersService` | ✅ | Full CRUD |
 | `TemplatesService` | ✅ | Full CRUD |
 | `UsersService` | ✅ | Read-only |
 | `EnvService` | ✅ | List, Set, Delete with scope |
 | `SecretService` | ✅ | List, Set, Delete with scope |
 | `AuthService` | ✅ | WhoAmI |
 
-#### Host Client (`pkg/hostclient/`)
+#### Host Client (`pkg/brokerclient/`)
 
 | Service | Implementation | Notes |
 |---------|----------------|-------|
@@ -116,7 +116,7 @@ All store interfaces defined in `pkg/store/store.go`:
 | M1 | Project Setup (Koa, Vite, TypeScript) | ✅ Complete |
 | M2 | Core Shell & Routing | ✅ Complete |
 | M3 | Grove Management | ❌ Not Started |
-| M4 | Runtime Host Management | ❌ Not Started |
+| M4 | Runtime Broker Management | ❌ Not Started |
 | M5 | Agent List & Overview | ❌ Not Started |
 | M6 | Agent Creation Wizard | ❌ Not Started |
 | M7 | Real-time Agent Monitoring | ❌ Not Started |
@@ -138,8 +138,8 @@ All store interfaces defined in `pkg/store/store.go`:
 | Feature | Design Doc | Notes |
 |---------|------------|-------|
 | OAuth Authentication | `dev-auth.md` | Only dev auth implemented |
-| WebSocket Control Channel | `runtimehost-websocket.md` | ✅ **Implemented** - See Section 9 |
-| PTY Relay | `runtimehost-websocket.md` | ✅ **Implemented** - CLI attach via Hub |
+| WebSocket Control Channel | `runtimebroker-websocket.md` | ✅ **Implemented** - See Section 9 |
+| PTY Relay | `runtimebroker-websocket.md` | ✅ **Implemented** - CLI attach via Hub |
 | NATS Integration | `web-frontend-design.md` | For real-time updates |
 | SSE Snapshot+Delta | `web-frontend-design.md` | For UI state sync |
 | xterm.js Terminal | `frontend-milestones.md` | M8 milestone (PTY backend ready) |
@@ -164,14 +164,14 @@ All store interfaces defined in `pkg/store/store.go`:
 #### 2.1.2 Control Channel
 **Design:** `hosted-architecture.md` specifies WebSocket-based control channel for Hub-to-Host communication, essential for NAT traversal.
 
-**Implementation:** No WebSocket handlers in `pkg/hub/` or `pkg/runtimehost/`.
+**Implementation:** No WebSocket handlers in `pkg/hub/` or `pkg/runtimebroker/`.
 
-**Gap:** Remote runtime hosts behind NAT cannot receive commands from Hub.
+**Gap:** Remote runtime brokers behind NAT cannot receive commands from Hub.
 
 **Recommendation:** Implement control channel as high priority for multi-host deployments.
 
 #### 2.1.3 Agent Dispatcher
-**Design:** Hub API should dispatch create/start/stop requests to appropriate Runtime Host.
+**Design:** Hub API should dispatch create/start/stop requests to appropriate Runtime Broker.
 
 **Implementation:** `pkg/hub/server.go` defines `AgentDispatcher` interface with `DispatchAgentCreate` method. `cmd/server.go` implements a local dispatcher adapter.
 
@@ -214,7 +214,7 @@ All store interfaces defined in `pkg/store/store.go`:
 #### 2.2.4 Secret Scope Resolution
 **Risk:** Ambiguous precedence when same secret key exists at multiple scopes.
 
-**Current State:** Design specifies User > Grove > RuntimeHost precedence but implementation unclear.
+**Current State:** Design specifies User > Grove > RuntimeBroker precedence but implementation unclear.
 
 **Recommendation:**
 - Document scope resolution order explicitly in API
@@ -296,7 +296,7 @@ All store interfaces defined in `pkg/store/store.go`:
 - Return proper 409 Conflict for invalid transitions
 
 #### M1.2: Host Health Monitoring
-- Implement heartbeat endpoint on Runtime Host
+- Implement heartbeat endpoint on Runtime Broker
 - Add heartbeat tracking in Hub store
 - Mark agents as `unknown` on heartbeat timeout
 - Add host reconciliation on reconnect
@@ -315,11 +315,11 @@ All store interfaces defined in `pkg/store/store.go`:
 - Handle dispatch failures with proper error responses
 
 #### M2.2: Control Channel (WebSocket) ✅ COMPLETE
-- ✅ Implement WebSocket upgrade on Hub `/api/v1/runtime-hosts/connect`
+- ✅ Implement WebSocket upgrade on Hub `/api/v1/runtime-brokers/connect`
 - ✅ Add host authentication on connect (HMAC)
 - ✅ Implement HTTP tunneling protocol
 - ✅ Handle reconnection with exponential backoff
-- See `runtimehost-websocket.md` Section 9 for implementation details
+- See `runtimebroker-websocket.md` Section 9 for implementation details
 
 #### M2.3: NAT Traversal ✅ COMPLETE
 - ✅ Host initiates connection to Hub
@@ -345,7 +345,7 @@ All store interfaces defined in `pkg/store/store.go`:
 - ✅ Bidirectional I/O relay via control channel streams
 - ⚠️ Window resize handling (events captured, tmux resize pending)
 - ✅ Disconnection handling (graceful close)
-- See `runtimehost-websocket.md` Section 9 for implementation details
+- See `runtimebroker-websocket.md` Section 9 for implementation details
 
 #### M3.4: Agent Monitoring
 - Real-time status updates (SSE or WebSocket)

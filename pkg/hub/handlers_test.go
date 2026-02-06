@@ -193,7 +193,7 @@ func TestAgentCreate(t *testing.T) {
 	srv, s := testServer(t)
 	ctx := context.Background()
 
-	// Create a runtime host first
+	// Create a runtime broker first
 	broker := &store.RuntimeBroker{
 		ID:     "host_test123",
 		Slug:   "test-host",
@@ -202,10 +202,10 @@ func TestAgentCreate(t *testing.T) {
 		Status: store.BrokerStatusOnline,
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
-	// Create a grove with default runtime host
+	// Create a grove with default runtime broker
 	grove := &store.Grove{
 		ID:                   "grove_abc123",
 		Slug:                 "my-grove",
@@ -268,13 +268,13 @@ func TestAgentCreate(t *testing.T) {
 	}
 }
 
-// TestAgentCreate_SingleContributor tests that when a grove has no default runtime host
+// TestAgentCreate_SingleContributor tests that when a grove has no default runtime broker
 // but has exactly one online contributor, that contributor is used automatically.
 func TestAgentCreate_SingleContributor(t *testing.T) {
 	srv, s := testServer(t)
 	ctx := context.Background()
 
-	// Create a runtime host
+	// Create a runtime broker
 	broker := &store.RuntimeBroker{
 		ID:     "host_single",
 		Slug:   "single-host",
@@ -283,10 +283,10 @@ func TestAgentCreate_SingleContributor(t *testing.T) {
 		Status: store.BrokerStatusOnline,
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
-	// Create a grove WITHOUT a default runtime host
+	// Create a grove WITHOUT a default runtime broker
 	grove := &store.Grove{
 		ID:        "grove_single",
 		Slug:      "single-grove",
@@ -336,12 +336,12 @@ func TestAgentCreate_SingleContributor(t *testing.T) {
 }
 
 // TestAgentCreate_MultipleContributors tests that when a grove has multiple online contributors
-// but no default runtime host, an error is returned requiring explicit selection.
+// but no default runtime broker, an error is returned requiring explicit selection.
 func TestAgentCreate_MultipleContributors(t *testing.T) {
 	srv, s := testServer(t)
 	ctx := context.Background()
 
-	// Create two runtime hosts
+	// Create two runtime brokers
 	broker1 := &store.RuntimeBroker{
 		ID:     "host_multi1",
 		Slug:   "multi-host-1",
@@ -350,7 +350,7 @@ func TestAgentCreate_MultipleContributors(t *testing.T) {
 		Status: store.BrokerStatusOnline,
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker1); err != nil {
-		t.Fatalf("failed to create runtime host 1: %v", err)
+		t.Fatalf("failed to create runtime broker 1: %v", err)
 	}
 
 	broker2 := &store.RuntimeBroker{
@@ -361,10 +361,10 @@ func TestAgentCreate_MultipleContributors(t *testing.T) {
 		Status: store.BrokerStatusOnline,
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker2); err != nil {
-		t.Fatalf("failed to create runtime host 2: %v", err)
+		t.Fatalf("failed to create runtime broker 2: %v", err)
 	}
 
-	// Create a grove WITHOUT a default runtime host
+	// Create a grove WITHOUT a default runtime broker
 	grove := &store.Grove{
 		ID:        "grove_multi",
 		Slug:      "multi-grove",
@@ -419,8 +419,8 @@ func TestAgentCreate_MultipleContributors(t *testing.T) {
 		t.Fatalf("failed to decode error response: %v", err)
 	}
 
-	if errResp.Error.Code != ErrCodeNoRuntimeHost {
-		t.Errorf("expected error code %q, got %q", ErrCodeNoRuntimeHost, errResp.Error.Code)
+	if errResp.Error.Code != ErrCodeNoRuntimeBroker {
+		t.Errorf("expected error code %q, got %q", ErrCodeNoRuntimeBroker, errResp.Error.Code)
 	}
 
 	// Should include available hosts in the response details
@@ -777,7 +777,7 @@ func TestGroveRegisterWithHostID(t *testing.T) {
 		Status: store.BrokerStatusOnline,
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	// Now register grove with hostId (Phase 3)
@@ -807,10 +807,10 @@ func TestGroveRegisterWithHostID(t *testing.T) {
 	}
 
 	// Host should be populated in response
-	if resp.Host == nil {
+	if resp.Broker == nil {
 		t.Error("expected host to be set in response")
-	} else if resp.Host.ID != broker.ID {
-		t.Errorf("expected host ID %q, got %q", broker.ID, resp.Host.ID)
+	} else if resp.Broker.ID != broker.ID {
+		t.Errorf("expected host ID %q, got %q", broker.ID, resp.Broker.ID)
 	}
 
 	// Should NOT have secretKey (two-phase flow doesn't generate secrets in grove registration)
@@ -885,7 +885,7 @@ func TestAddContributor(t *testing.T) {
 		Status: store.BrokerStatusOnline,
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	// Add contributor via API
@@ -915,13 +915,13 @@ func TestAddContributor(t *testing.T) {
 		t.Errorf("expected localPath, got %q", resp.Contributor.LocalPath)
 	}
 
-	// Verify grove now has default runtime host set
+	// Verify grove now has default runtime broker set
 	updatedGrove, err := s.GetGrove(ctx, grove.ID)
 	if err != nil {
 		t.Fatalf("failed to get updated grove: %v", err)
 	}
 	if updatedGrove.DefaultRuntimeBrokerID != broker.ID {
-		t.Errorf("expected default runtime host to be set to %q, got %q", broker.ID, updatedGrove.DefaultRuntimeBrokerID)
+		t.Errorf("expected default runtime broker to be set to %q, got %q", broker.ID, updatedGrove.DefaultRuntimeBrokerID)
 	}
 }
 
@@ -950,7 +950,7 @@ func TestListContributors(t *testing.T) {
 		Status: store.BrokerStatusOnline,
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	contrib := &store.GroveContributor{
@@ -1036,7 +1036,7 @@ func TestRuntimeHostList(t *testing.T) {
 		Updated:       time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	rec := doRequest(t, srv, http.MethodGet, "/api/v1/runtime-brokers", nil)
@@ -1050,8 +1050,8 @@ func TestRuntimeHostList(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(resp.Hosts) != 1 {
-		t.Errorf("expected 1 host, got %d", len(resp.Hosts))
+	if len(resp.Brokers) != 1 {
+		t.Errorf("expected 1 host, got %d", len(resp.Brokers))
 	}
 }
 
@@ -1070,7 +1070,7 @@ func TestRuntimeHostGetByID(t *testing.T) {
 		Updated:       time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	rec := doRequest(t, srv, http.MethodGet, "/api/v1/runtime-brokers/host_gettest", nil)
@@ -1106,7 +1106,7 @@ func TestRuntimeHostListWithGroveLocalPath(t *testing.T) {
 		t.Fatalf("failed to create grove: %v", err)
 	}
 
-	// Create a runtime host
+	// Create a runtime broker
 	broker := &store.RuntimeBroker{
 		ID:            "host_localpath_test",
 		Name:          "Local Path Test Host",
@@ -1118,7 +1118,7 @@ func TestRuntimeHostListWithGroveLocalPath(t *testing.T) {
 		Updated:       time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	// Add host as grove contributor with a local path
@@ -1134,7 +1134,7 @@ func TestRuntimeHostListWithGroveLocalPath(t *testing.T) {
 		t.Fatalf("failed to add grove contributor: %v", err)
 	}
 
-	// List runtime hosts filtered by grove - should include localPath
+	// List runtime brokers filtered by grove - should include localPath
 	rec := doRequest(t, srv, http.MethodGet, "/api/v1/runtime-brokers?groveId=grove_localpath_test", nil)
 
 	if rec.Code != http.StatusOK {
@@ -1146,19 +1146,19 @@ func TestRuntimeHostListWithGroveLocalPath(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(resp.Hosts) != 1 {
-		t.Errorf("expected 1 host, got %d", len(resp.Hosts))
+	if len(resp.Brokers) != 1 {
+		t.Errorf("expected 1 host, got %d", len(resp.Brokers))
 	}
 
-	if resp.Hosts[0].ID != "host_localpath_test" {
-		t.Errorf("expected host ID 'host_localpath_test', got %q", resp.Hosts[0].ID)
+	if resp.Brokers[0].ID != "host_localpath_test" {
+		t.Errorf("expected host ID 'host_localpath_test', got %q", resp.Brokers[0].ID)
 	}
 
-	if resp.Hosts[0].LocalPath != "/path/to/project/.scion" {
-		t.Errorf("expected localPath '/path/to/project/.scion', got %q", resp.Hosts[0].LocalPath)
+	if resp.Brokers[0].LocalPath != "/path/to/project/.scion" {
+		t.Errorf("expected localPath '/path/to/project/.scion', got %q", resp.Brokers[0].LocalPath)
 	}
 
-	// List all runtime hosts (no grove filter) - should NOT include localPath field structure
+	// List all runtime brokers (no grove filter) - should NOT include localPath field structure
 	// (uses ListRuntimeBrokersResponse, not ListRuntimeBrokersWithContributorResponse)
 	rec2 := doRequest(t, srv, http.MethodGet, "/api/v1/runtime-brokers", nil)
 	if rec2.Code != http.StatusOK {
@@ -1170,8 +1170,8 @@ func TestRuntimeHostListWithGroveLocalPath(t *testing.T) {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
-	if len(resp2.Hosts) != 1 {
-		t.Errorf("expected 1 host, got %d", len(resp2.Hosts))
+	if len(resp2.Brokers) != 1 {
+		t.Errorf("expected 1 host, got %d", len(resp2.Brokers))
 	}
 }
 
@@ -1201,7 +1201,7 @@ func testServerWithHostAuth(t *testing.T) (*Server, store.Store) {
 func TestHostRegistrationTwoPhaseFlow(t *testing.T) {
 	srv, _ := testServerWithHostAuth(t)
 
-	// Phase 1: Create host registration (requires admin auth)
+	// Phase 1: Create broker registration (requires admin auth)
 	createBody := map[string]interface{}{
 		"name":         "two-phase-host",
 		"capabilities": []string{"sync", "attach"},
@@ -1227,7 +1227,7 @@ func TestHostRegistrationTwoPhaseFlow(t *testing.T) {
 		t.Error("expected expiresAt to be set")
 	}
 
-	// Phase 2: Complete host join (unauthenticated - join token is auth)
+	// Phase 2: Complete broker join (unauthenticated - join token is auth)
 	joinBody := map[string]interface{}{
 		"brokerId":       createResp.BrokerID,
 		"joinToken":    createResp.JoinToken,
@@ -1241,7 +1241,7 @@ func TestHostRegistrationTwoPhaseFlow(t *testing.T) {
 		t.Errorf("Phase 2: expected status 200, got %d: %s", rec2.Code, rec2.Body.String())
 	}
 
-	var joinResp HostJoinResponse
+	var joinResp BrokerJoinResponse
 	if err := json.NewDecoder(rec2.Body).Decode(&joinResp); err != nil {
 		t.Fatalf("failed to decode join response: %v", err)
 	}
@@ -1273,10 +1273,10 @@ func TestHostRegistrationTwoPhaseFlow(t *testing.T) {
 	if !groveResp.Created {
 		t.Error("expected grove to be created")
 	}
-	if groveResp.Host == nil {
+	if groveResp.Broker == nil {
 		t.Error("expected host in response")
-	} else if groveResp.Host.ID != joinResp.BrokerID {
-		t.Errorf("expected host ID %q, got %q", joinResp.BrokerID, groveResp.Host.ID)
+	} else if groveResp.Broker.ID != joinResp.BrokerID {
+		t.Errorf("expected host ID %q, got %q", joinResp.BrokerID, groveResp.Broker.ID)
 	}
 
 	// The new flow should NOT return a secretKey from grove registration

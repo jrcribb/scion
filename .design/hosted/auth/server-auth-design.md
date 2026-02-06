@@ -30,7 +30,7 @@ The Hub server must handle authentication from three distinct sources:
 
 - OAuth provider integration (handled by web frontend and CLI)
 - Token issuance for user sessions (handled by web frontend or future Hub auth endpoints)
-- Runtime Host authentication (covered in runtime-host-auth.md)
+- Runtime Broker authentication (covered in runtime-broker-auth.md)
 
 ---
 
@@ -458,7 +458,7 @@ Agents receive a Hub-issued JWT during provisioning. See [sciontool-auth.md](sci
 
 ```
 ┌───────────┐         ┌──────────────┐         ┌─────────┐
-│    Hub    │──(1)───►│ Runtime Host │──(2)───►│  Agent  │
+│    Hub    │──(1)───►│ Runtime Broker │──(2)───►│  Agent  │
 │           │ Provision│             │ Start   │Container│
 └───────────┘ +token  └──────────────┘ +env    └─────────┘
                                                      │

@@ -19,4 +19,4 @@ Scion uses a Manager-Worker architecture where the `scion` CLI (Manager) orchest
 - **Agent Status**: Agents report state via a JSON status file in their home directory, enabling the Manager to monitor progress and detect when an agent is awaiting user input.
 - **Interactivity**: The `attach` command connects the host TTY to the agent's container, facilitating human-in-the-loop debugging and confirmation.
 
-For detailed operational guides and technical specifications of other components (Hub, Runtime Host, etc.), refer to the respective files in `.design/hosted/`.
+For detailed operational guides and technical specifications of other components (Hub, Runtime Broker, etc.), refer to the respective files in `.design/hosted/`.

@@ -1,17 +1,17 @@
-# Runtime Host API Design
+# Runtime Broker API Design
 
 ## Status
 **Proposed** (v3 - Aligned with Hub API)
 
 ## 1. Overview
 
-The **Runtime Host API** is the control plane interface exposed by a Scion Runtime Host (e.g., a Kubernetes cluster or a dedicated Docker server). It allows the **Scion Hub** to remotely manage the lifecycle of agents, workspaces, and executions.
+The **Runtime Broker API** is the control plane interface exposed by a Scion Runtime Broker (e.g., a Kubernetes cluster or a dedicated Docker server). It allows the **Scion Hub** to remotely manage the lifecycle of agents, workspaces, and executions.
 
 This API effectively exposes the `pkg/agent.Manager` interface over a network boundary, adding authentication, multi-tenancy context, and streaming capabilities for PTY access.
 
 ### 1.1. Grove-Centric Architecture
 
-Runtime Hosts interact with the Hub through the **groves they contribute to**. A host does not register itself as a standalone entity; instead, it registers one or more groves via `POST /api/v1/groves/register` on the Hub. This grove registration:
+Runtime Brokers interact with the Hub through the **groves they contribute to**. A host does not register itself as a standalone entity; instead, it registers one or more groves via `POST /api/v1/groves/register` on the Hub. This grove registration:
 
 1. Creates or links to an existing grove (identified by git remote URL)
 2. Adds this host as a contributor to the grove
@@ -21,7 +21,7 @@ All agent operations on a host are scoped to the groves it contributes to.
 
 ### 1.2. Relationship to Hub API
 
-This document describes the **Direct HTTP** interface for Runtime Hosts. The Hub communicates with hosts via two transports:
+This document describes the **Direct HTTP** interface for Runtime Brokers. The Hub communicates with hosts via two transports:
 
 1. **Direct HTTP** (this API): Hub calls Host endpoints directly. Used when hosts have stable, reachable endpoints (K8s services, cloud VMs).
 
@@ -66,20 +66,20 @@ The Host runs in one of three modes, affecting API availability:
 
 ### 2.2. Authentication Methods
 
-Runtime Host authentication uses **HMAC-based request signing** as the primary method. This provides mutual authentication between Hub and Runtime Hosts without requiring token transmission after initial registration.
+Runtime Broker authentication uses **HMAC-based request signing** as the primary method. This provides mutual authentication between Hub and Runtime Brokers without requiring token transmission after initial registration.
 
 | Header | Format | Description |
 |--------|--------|-------------|
-| `X-Scion-Broker-ID` | UUID or slug | Unique identifier for the Runtime Host |
+| `X-Scion-Broker-ID` | UUID or slug | Unique identifier for the Runtime Broker |
 | `X-Scion-Timestamp` | RFC 3339 | Request timestamp (e.g., `2025-01-30T12:00:00Z`) |
 | `X-Scion-Nonce` | Base64 (16 bytes) | Random nonce for replay prevention |
 | `X-Scion-Signature` | Base64 (32 bytes) | HMAC-SHA256 signature |
 
-The shared secret is established during host registration (see [Runtime Host Auth](auth/runtime-host-auth.md) Section 3).
+The shared secret is established during host registration (see [Runtime Broker Auth](auth/runtime-broker-auth.md) Section 3).
 
 ### 2.3. Request Signing Process
 
-All authenticated requests between Hub and Runtime Host are HMAC-signed:
+All authenticated requests between Hub and Runtime Broker are HMAC-signed:
 
 1. **Build Canonical String:**
    ```
@@ -94,7 +94,7 @@ All authenticated requests between Hub and Runtime Host are HMAC-signed:
    - Optional nonce cache for strict replay prevention
    - Constant-time signature comparison
 
-See [Runtime Host Auth](auth/runtime-host-auth.md) for the complete specification.
+See [Runtime Broker Auth](auth/runtime-broker-auth.md) for the complete specification.
 
 ## 3. Host Lifecycle & Events
 
@@ -118,7 +118,7 @@ See Hub API Section 4.3 for the full request/response format.
 After registering at least one grove, hosts establish a persistent WebSocket for real-time communication:
 
 ```
-WS {HUB_URL}/api/v1/runtime-hosts/connect
+WS {HUB_URL}/api/v1/runtime-brokers/connect
 ```
 
 See Hub API Section 10 for the control channel protocol.
@@ -128,7 +128,7 @@ See Hub API Section 10 for the control channel protocol.
 Hosts report health every 30 seconds. Hub marks host `offline` after 3 missed heartbeats.
 
 ```
-POST {HUB_URL}/api/v1/runtime-hosts/{hostId}/heartbeat
+POST {HUB_URL}/api/v1/runtime-brokers/{hostId}/heartbeat
 ```
 
 ```json
@@ -161,7 +161,7 @@ Hosts push state changes via the Hub's event endpoint or control channel.
 
 **Via HTTP (if Hub reachable):**
 ```
-POST {HUB_URL}/api/v1/runtime-hosts/{hostId}/events
+POST {HUB_URL}/api/v1/runtime-brokers/{hostId}/events
 ```
 
 **Via Control Channel:**
@@ -567,7 +567,7 @@ GET /api/v1/info
 
 ## 5. Environment Variable Injection
 
-When the Hub dispatches a `CreateAgent` command to a Runtime Host, it includes a `resolvedEnv` field containing the fully merged environment variables and secrets for the agent.
+When the Hub dispatches a `CreateAgent` command to a Runtime Broker, it includes a `resolvedEnv` field containing the fully merged environment variables and secrets for the agent.
 
 ### 5.1 Resolution Process
 
@@ -575,7 +575,7 @@ The Hub resolves environment variables from multiple scopes before dispatching:
 
 1. **User scope:** Variables/secrets defined for the agent's owner
 2. **Grove scope:** Variables/secrets defined for the grove
-3. **Runtime Host scope:** Variables/secrets defined for the target host
+3. **Runtime Broker scope:** Variables/secrets defined for the target host
 4. **Agent config:** Variables explicitly set in the agent creation request
 
 Later scopes override earlier ones. See `hosted-architecture.md` Section 6 for the full design.
@@ -594,11 +594,11 @@ The `resolvedEnv` field in the agent creation request contains the final merged 
 }
 ```
 
-The `config.env` field contains additional variables specified directly in the agent creation request. The Runtime Host should merge both, with `config.env` taking precedence over `resolvedEnv`.
+The `config.env` field contains additional variables specified directly in the agent creation request. The Runtime Broker should merge both, with `config.env` taking precedence over `resolvedEnv`.
 
 ### 5.3 Injection Behavior
 
-The Runtime Host must:
+The Runtime Broker must:
 
 1. Merge `resolvedEnv` with `config.env` (config.env takes precedence)
 2. Inject all variables into the container environment

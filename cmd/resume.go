@@ -28,7 +28,7 @@ func init() {
 	resumeCmd.Flags().BoolVar(&noAuth, "no-auth", false, "Disable authentication propagation")
 	resumeCmd.Flags().BoolVarP(&attach, "attach", "a", false, "Attach to the agent TTY after starting")
 
-	resumeCmd.Flags().StringVar(&runtimeBrokerID, "broker", "", "Preferred runtime host ID or name")
+	resumeCmd.Flags().StringVar(&runtimeBrokerID, "broker", "", "Preferred runtime broker ID or name")
 
 	// Template resolution flags for Hub mode (Section 9.4)
 	resumeCmd.Flags().BoolVar(&uploadTemplate, "upload-template", false, "Automatically upload local template to Hub if not found")

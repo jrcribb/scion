@@ -30,7 +30,7 @@ var ptyUpgrader = websocket.Upgrader{
 }
 
 // handleAgentAttach handles direct WebSocket PTY connections.
-// This is used when clients connect directly to the runtime host.
+// This is used when clients connect directly to the runtime broker.
 // Route: GET /api/v1/agents/{id}/attach
 func (s *Server) handleAgentAttach(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

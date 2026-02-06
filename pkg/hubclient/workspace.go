@@ -11,7 +11,7 @@ import (
 // WorkspaceService handles workspace synchronization operations.
 type WorkspaceService interface {
 	// SyncFrom initiates download of workspace from an agent.
-	// Triggers the Runtime Host to upload workspace to GCS and returns signed download URLs.
+	// Triggers the Runtime Broker to upload workspace to GCS and returns signed download URLs.
 	SyncFrom(ctx context.Context, agentID string, opts *SyncFromOptions) (*SyncFromResponse, error)
 
 	// SyncTo initiates upload of workspace to an agent.
@@ -19,7 +19,7 @@ type WorkspaceService interface {
 	SyncTo(ctx context.Context, agentID string, files []transfer.FileInfo) (*SyncToResponse, error)
 
 	// FinalizeSyncTo completes the sync-to operation after files are uploaded.
-	// Triggers the Runtime Host to apply the workspace from GCS.
+	// Triggers the Runtime Broker to apply the workspace from GCS.
 	FinalizeSyncTo(ctx context.Context, agentID string, manifest *transfer.Manifest) (*SyncToFinalizeResponse, error)
 
 	// GetStatus returns the current workspace sync status for an agent.

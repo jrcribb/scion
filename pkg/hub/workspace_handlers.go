@@ -162,7 +162,7 @@ func (s *Server) handleWorkspaceStatus(w http.ResponseWriter, r *http.Request, a
 //
 // This endpoint:
 // 1. Validates the agent exists and is running
-// 2. Tunnels a request to the Runtime Host to upload workspace to GCS
+// 2. Tunnels a request to the Runtime Broker to upload workspace to GCS
 // 3. Returns signed download URLs for the CLI to fetch files
 func (s *Server) handleWorkspaceSyncFrom(w http.ResponseWriter, r *http.Request, agentID string) {
 	ctx := r.Context()
@@ -199,26 +199,26 @@ func (s *Server) handleWorkspaceSyncFrom(w http.ResponseWriter, r *http.Request,
 	// Get workspace storage path
 	storagePath := storage.WorkspaceStoragePath(agent.GroveID, agentID)
 
-	// Tunnel request to Runtime Host to upload workspace to GCS
+	// Tunnel request to Runtime Broker to upload workspace to GCS
 	cc := s.GetControlChannelManager()
 	if cc == nil {
 		RuntimeError(w, "Control channel not available")
 		return
 	}
 
-	// Build request for Runtime Host
+	// Build request for Runtime Broker
 	uploadReq := RuntimeBrokerWorkspaceUploadRequest{
 		AgentID:         agentID,
 		StoragePath:     storagePath,
 		ExcludePatterns: req.ExcludePatterns,
 	}
 
-	// Send tunneled request to Runtime Host
+	// Send tunneled request to Runtime Broker
 	var uploadResp RuntimeBrokerWorkspaceUploadResponse
 	if err := tunnelWorkspaceRequest(ctx, cc, agent.RuntimeBrokerID, "POST", "/api/v1/workspace/upload", uploadReq, &uploadResp); err != nil {
 		// Check if it's a timeout or connection issue
 		if strings.Contains(err.Error(), "timeout") {
-			GatewayTimeout(w, "Runtime Host unreachable")
+			GatewayTimeout(w, "Runtime Broker unreachable")
 			return
 		}
 		RuntimeError(w, "Failed to sync workspace: "+err.Error())
@@ -347,7 +347,7 @@ func (s *Server) handleWorkspaceSyncTo(w http.ResponseWriter, r *http.Request, a
 //
 // This endpoint:
 // 1. Validates the manifest and uploaded files
-// 2. Tunnels request to Runtime Host to apply workspace from GCS
+// 2. Tunnels request to Runtime Broker to apply workspace from GCS
 // 3. Updates workspace metadata
 func (s *Server) handleWorkspaceSyncToFinalize(w http.ResponseWriter, r *http.Request, agentID string) {
 	ctx := r.Context()
@@ -405,7 +405,7 @@ func (s *Server) handleWorkspaceSyncToFinalize(w http.ResponseWriter, r *http.Re
 	// Compute content hash from file hashes
 	contentHash := transfer.ComputeContentHash(req.Manifest.Files)
 
-	// Tunnel request to Runtime Host to apply workspace
+	// Tunnel request to Runtime Broker to apply workspace
 	cc := s.GetControlChannelManager()
 	if cc == nil {
 		RuntimeError(w, "Control channel not available")
@@ -421,7 +421,7 @@ func (s *Server) handleWorkspaceSyncToFinalize(w http.ResponseWriter, r *http.Re
 	var applyResp RuntimeBrokerWorkspaceApplyResponse
 	if err := tunnelWorkspaceRequest(ctx, cc, agent.RuntimeBrokerID, "POST", "/api/v1/workspace/apply", applyReq, &applyResp); err != nil {
 		if strings.Contains(err.Error(), "timeout") {
-			GatewayTimeout(w, "Runtime Host unreachable")
+			GatewayTimeout(w, "Runtime Broker unreachable")
 			return
 		}
 		RuntimeError(w, "Failed to apply workspace: "+err.Error())
@@ -442,37 +442,37 @@ func (s *Server) handleWorkspaceSyncToFinalize(w http.ResponseWriter, r *http.Re
 	})
 }
 
-// Runtime Host request/response types for control channel tunneling
+// Runtime Broker request/response types for control channel tunneling
 
-// RuntimeBrokerWorkspaceUploadRequest is sent to Runtime Host to upload workspace to GCS.
+// RuntimeBrokerWorkspaceUploadRequest is sent to Runtime Broker to upload workspace to GCS.
 type RuntimeBrokerWorkspaceUploadRequest struct {
 	AgentID         string   `json:"agentId"`
 	StoragePath     string   `json:"storagePath"`
 	ExcludePatterns []string `json:"excludePatterns,omitempty"`
 }
 
-// RuntimeBrokerWorkspaceUploadResponse is the response from Runtime Host after workspace upload.
+// RuntimeBrokerWorkspaceUploadResponse is the response from Runtime Broker after workspace upload.
 type RuntimeBrokerWorkspaceUploadResponse struct {
 	Manifest      *transfer.Manifest `json:"manifest"`
 	UploadedFiles int                `json:"uploadedFiles"`
 	UploadedBytes int64              `json:"uploadedBytes"`
 }
 
-// RuntimeBrokerWorkspaceApplyRequest is sent to Runtime Host to apply workspace from GCS.
+// RuntimeBrokerWorkspaceApplyRequest is sent to Runtime Broker to apply workspace from GCS.
 type RuntimeBrokerWorkspaceApplyRequest struct {
 	AgentID     string             `json:"agentId"`
 	StoragePath string             `json:"storagePath"`
 	Manifest    *transfer.Manifest `json:"manifest"`
 }
 
-// RuntimeBrokerWorkspaceApplyResponse is the response from Runtime Host after workspace apply.
+// RuntimeBrokerWorkspaceApplyResponse is the response from Runtime Broker after workspace apply.
 type RuntimeBrokerWorkspaceApplyResponse struct {
 	Applied      bool  `json:"applied"`
 	FilesApplied int   `json:"filesApplied"`
 	BytesApplied int64 `json:"bytesApplied"`
 }
 
-// tunnelWorkspaceRequest tunnels a workspace request to a Runtime Host via the control channel.
+// tunnelWorkspaceRequest tunnels a workspace request to a Runtime Broker via the control channel.
 func tunnelWorkspaceRequest(ctx context.Context, cc *ControlChannelManager, brokerID, method, path string, reqBody interface{}, respBody interface{}) error {
 	// Check host is connected
 	if !cc.IsConnected(brokerID) {
@@ -521,12 +521,12 @@ func errHostNotConnected(brokerID string) error {
 	return &hostError{brokerID: brokerID, msg: "host not connected via control channel"}
 }
 
-// errRuntimeHostError returns an error from the runtime host.
+// errRuntimeHostError returns an error from the runtime broker.
 func errRuntimeHostError(statusCode int, body string) error {
 	return &hostError{statusCode: statusCode, msg: body}
 }
 
-// hostError represents an error from communication with a runtime host.
+// hostError represents an error from communication with a runtime broker.
 type hostError struct {
 	brokerID     string
 	statusCode int

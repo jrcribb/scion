@@ -185,7 +185,7 @@ interface EnvVar {
   id: string;
   key: string;
   value: string;
-  scope: 'user' | 'grove' | 'runtime_host';
+  scope: 'user' | 'grove' | 'runtime_broker';
   scopeId: string;
   description?: string;
   sensitive: boolean;
@@ -196,7 +196,7 @@ interface EnvVar {
 interface Secret {
   id: string;
   key: string;
-  scope: 'user' | 'grove' | 'runtime_host';
+  scope: 'user' | 'grove' | 'runtime_broker';
   scopeId: string;
   description?: string;
   version: number;
@@ -2230,7 +2230,7 @@ export class AccessEvaluator extends LitElement {
 // src/components/pages/settings-env.ts
 @customElement('scion-settings-env')
 export class SettingsEnv extends LitElement {
-  @property({ type: String }) scope: 'user' | 'grove' | 'runtime_host' = 'user';
+  @property({ type: String }) scope: 'user' | 'grove' | 'runtime_broker' = 'user';
   @property({ type: String }) scopeId?: string;
   @state() private envVars: EnvVar[] = [];
   @state() private secrets: Secret[] = [];

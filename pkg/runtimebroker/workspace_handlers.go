@@ -102,7 +102,7 @@ func (s *Server) handleWorkspaceUpload(w http.ResponseWriter, r *http.Request) {
 		bucket = s.config.StorageBucket
 	}
 	if bucket == "" {
-		ValidationError(w, "bucket is required (not configured on host)", nil)
+		ValidationError(w, "bucket is required (not configured on broker)", nil)
 		return
 	}
 
@@ -199,7 +199,7 @@ func (s *Server) handleWorkspaceApply(w http.ResponseWriter, r *http.Request) {
 		bucket = s.config.StorageBucket
 	}
 	if bucket == "" {
-		ValidationError(w, "bucket is required (not configured on host)", nil)
+		ValidationError(w, "bucket is required (not configured on broker)", nil)
 		return
 	}
 

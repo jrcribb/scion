@@ -414,7 +414,7 @@ func TestWorkspaceGetStatus_GatewayTimeout(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"error": map[string]string{
 				"code":    "gateway_timeout",
-				"message": "Runtime Host unreachable",
+				"message": "Runtime Broker unreachable",
 			},
 		})
 	}))

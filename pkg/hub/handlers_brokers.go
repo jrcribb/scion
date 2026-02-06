@@ -56,7 +56,7 @@ func (s *Server) createBrokerRegistration(w http.ResponseWriter, r *http.Request
 	resp, err := s.brokerAuthService.CreateHostRegistration(r.Context(), req, user.ID())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
-			"failed to create host registration: "+err.Error(), nil)
+			"failed to create broker registration: "+err.Error(), nil)
 		return
 	}
 
@@ -83,7 +83,7 @@ func (s *Server) handleBrokerJoin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse request
-	var req HostJoinRequest
+	var req BrokerJoinRequest
 	if err := readJSON(r, &req); err != nil {
 		BadRequest(w, "invalid request body: "+err.Error())
 		return
@@ -129,7 +129,7 @@ func (s *Server) handleBrokerJoin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, ErrCodeExpiredJoinToken, errMsg, nil)
 		default:
 			writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
-				"failed to complete host join: "+errMsg, nil)
+				"failed to complete broker join: "+errMsg, nil)
 		}
 		return
 	}

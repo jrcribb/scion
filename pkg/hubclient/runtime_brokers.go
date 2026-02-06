@@ -7,7 +7,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/apiclient"
 )
 
-// RuntimeBrokerService handles runtime host operations.
+// RuntimeBrokerService handles runtime broker operations.
 type RuntimeBrokerService interface {
 	// Create creates a new host registration and returns a join token.
 	// The join token must be used with Join() to complete registration.
@@ -17,10 +17,10 @@ type RuntimeBrokerService interface {
 	// Returns the HMAC secret key for future authentication.
 	Join(ctx context.Context, req *JoinBrokerRequest) (*JoinBrokerResponse, error)
 
-	// List returns runtime hosts matching the filter criteria.
+	// List returns runtime brokers matching the filter criteria.
 	List(ctx context.Context, opts *ListBrokersOptions) (*ListBrokersResponse, error)
 
-	// Get returns a single runtime host by ID.
+	// Get returns a single runtime broker by ID.
 	Get(ctx context.Context, brokerID string) (*RuntimeBroker, error)
 
 	// Update updates host metadata.
@@ -41,7 +41,7 @@ type runtimeBrokerService struct {
 	c *client
 }
 
-// ListBrokersOptions configures runtime host list filtering.
+// ListBrokersOptions configures runtime broker list filtering.
 type ListBrokersOptions struct {
 	Status  string // Filter by status (online, offline)
 	Mode    string // Filter by mode (connected, read-only)
@@ -49,13 +49,13 @@ type ListBrokersOptions struct {
 	Page    apiclient.PageOptions
 }
 
-// ListBrokersResponse is the response from listing runtime hosts.
+// ListBrokersResponse is the response from listing runtime brokers.
 type ListBrokersResponse struct {
 	Hosts []RuntimeBroker
 	Page  apiclient.PageResult
 }
 
-// UpdateBrokerRequest is the request for updating a runtime host.
+// UpdateBrokerRequest is the request for updating a runtime broker.
 type UpdateBrokerRequest struct {
 	Name        string            `json:"name,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
@@ -135,7 +135,7 @@ func (s *runtimeBrokerService) Join(ctx context.Context, req *JoinBrokerRequest)
 	return apiclient.DecodeResponse[JoinBrokerResponse](resp)
 }
 
-// List returns runtime hosts matching the filter criteria.
+// List returns runtime brokers matching the filter criteria.
 func (s *runtimeBrokerService) List(ctx context.Context, opts *ListBrokersOptions) (*ListBrokersResponse, error) {
 	query := url.Values{}
 	if opts != nil {
@@ -157,7 +157,7 @@ func (s *runtimeBrokerService) List(ctx context.Context, opts *ListBrokersOption
 	}
 
 	type listResponse struct {
-		Hosts      []RuntimeBroker `json:"hosts"`
+		Hosts      []RuntimeBroker `json:"brokers"`
 		NextCursor string        `json:"nextCursor,omitempty"`
 		TotalCount int           `json:"totalCount,omitempty"`
 	}
@@ -168,7 +168,7 @@ func (s *runtimeBrokerService) List(ctx context.Context, opts *ListBrokersOption
 	}
 
 	return &ListBrokersResponse{
-		Hosts: result.Hosts,
+		Hosts: result.Brokers,
 		Page: apiclient.PageResult{
 			NextCursor: result.NextCursor,
 			TotalCount: result.TotalCount,
@@ -176,7 +176,7 @@ func (s *runtimeBrokerService) List(ctx context.Context, opts *ListBrokersOption
 	}, nil
 }
 
-// Get returns a single runtime host by ID.
+// Get returns a single runtime broker by ID.
 func (s *runtimeBrokerService) Get(ctx context.Context, brokerID string) (*RuntimeBroker, error) {
 	resp, err := s.c.transport.Get(ctx, "/api/v1/runtime-brokers/"+brokerID, nil)
 	if err != nil {

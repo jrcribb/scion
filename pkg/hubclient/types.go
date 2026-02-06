@@ -77,7 +77,7 @@ type Grove struct {
 	Annotations          map[string]string  `json:"annotations,omitempty"`
 	Contributors         []GroveContributor `json:"contributors,omitempty"`
 	AgentCount           int                `json:"agentCount,omitempty"`
-	ActiveHostCount      int                `json:"activeHostCount,omitempty"`
+	ActiveBrokerCount      int                `json:"activeBrokerCount,omitempty"`
 }
 
 // GroveContributor represents a host contributing to a grove.
@@ -107,7 +107,7 @@ type BucketConfig struct {
 	Prefix   string `json:"prefix,omitempty"`
 }
 
-// RuntimeBroker represents a runtime host from the Hub API.
+// RuntimeBroker represents a runtime broker from the Hub API.
 type RuntimeBroker struct {
 	ID              string            `json:"id"`
 	Name            string            `json:"name"`
@@ -127,14 +127,14 @@ type RuntimeBroker struct {
 	Updated         time.Time         `json:"updated"`
 }
 
-// BrokerCapabilities describes runtime host capabilities.
+// BrokerCapabilities describes runtime broker capabilities.
 type BrokerCapabilities struct {
 	WebPTY bool `json:"webPty"`
 	Sync   bool `json:"sync"`
 	Attach bool `json:"attach"`
 }
 
-// BrokerProfile describes a runtime profile available on a host.
+// BrokerProfile describes a runtime profile available on a broker.
 type BrokerProfile struct {
 	Name      string `json:"name"`
 	Type      string `json:"type"`

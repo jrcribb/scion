@@ -18,7 +18,7 @@ The following end-to-end user scenarios define the milestone:
 5. **Stop the agent**
 6. **Remove the agent**
 
-These scenarios should work with Hub server and Runtime Host running on different machines (or emulated via separate processes on the same machine).
+These scenarios should work with Hub server and Runtime Broker running on different machines (or emulated via separate processes on the same machine).
 
 ---
 
@@ -42,9 +42,9 @@ These scenarios should work with Hub server and Runtime Host running on differen
 | - `scion hub register` | ✅ | |
 | - `scion hub deregister` | ✅ | |
 | - `scion hub status` | ✅ | |
-| - HMAC-based host authentication | ✅ | `pkg/hub/hostauth.go`, `pkg/runtimehost/hostauth.go` |
-| - Bidirectional HMAC (Hub→Host signing) | ✅ | `pkg/hub/hostclient.go` |
-| - Secret rotation endpoint | ✅ | `POST /api/v1/hosts/{id}/rotate-secret` |
+| - HMAC-based host authentication | ✅ | `pkg/hub/hostauth.go`, `pkg/runtimebroker/hostauth.go` |
+| - Bidirectional HMAC (Hub→Host signing) | ✅ | `pkg/hub/brokerclient.go` |
+| - Secret rotation endpoint | ✅ | `POST /api/v1/brokers/{id}/rotate-secret` |
 | - Nonce cache (replay prevention) | ✅ | Enabled by default |
 | **Agent Lifecycle (Hub Mode)** | ✅ Complete | `cmd/create.go`, `cmd/start.go`, `cmd/stop.go`, `cmd/delete.go` |
 | - Create via Hub | ✅ | |
@@ -52,12 +52,12 @@ These scenarios should work with Hub server and Runtime Host running on differen
 | - Stop via Hub | ✅ | |
 | - Delete via Hub | ✅ | |
 | **HTTP Dispatcher** | ✅ Complete | `pkg/hub/httpdispatcher.go` |
-| - Dispatch to remote Runtime Hosts via HTTP | ✅ | |
-| - Authenticated dispatch (HMAC-signed) | ✅ | `pkg/hub/hostclient.go` |
-| **Runtime Host API** | ✅ Complete | `pkg/runtimehost/` |
+| - Dispatch to remote Runtime Brokers via HTTP | ✅ | |
+| - Authenticated dispatch (HMAC-signed) | ✅ | `pkg/hub/brokerclient.go` |
+| **Runtime Broker API** | ✅ Complete | `pkg/runtimebroker/` |
 | - Agent lifecycle endpoints | ✅ | |
 | - Template cache/hydration | ✅ | `pkg/templatecache/` |
-| - Heartbeat to Hub | ✅ | `pkg/runtimehost/heartbeat.go` |
+| - Heartbeat to Hub | ✅ | `pkg/runtimebroker/heartbeat.go` |
 | - Strict auth mode (configurable) | ✅ | `HostAuthStrictMode` config |
 | **Observability** | ✅ Complete | |
 | - Audit logging | ✅ | `pkg/hub/audit.go` |
@@ -81,7 +81,7 @@ All blocking scenarios have been implemented. Workspace sync was the final piece
 | Component | Status | Key Files |
 |-----------|--------|-----------|
 | **Workspace Sync (Hosted)** | ✅ Complete | `cmd/sync.go`, `pkg/hub/workspace_handlers.go` |
-| - Sync workspace files to/from remote host | ✅ | `pkg/runtimehost/workspace_handlers.go` |
+| - Sync workspace files to/from remote host | ✅ | `pkg/runtimebroker/workspace_handlers.go` |
 | - rclone integration for workspace | ✅ | `pkg/gcp/storage.go` |
 | - Signed URL pattern (like templates) | ✅ | `pkg/hubclient/workspace.go` |
 | - Incremental sync via content hashing | ✅ | `pkg/transfer/` |
@@ -91,7 +91,7 @@ All blocking scenarios have been implemented. Workspace sync was the final piece
 **Workspace Sync:**
 - `cmd/sync.go` extended with hosted mode detection via `CheckHubAvailability()`
 - Uses the signed URL pattern (same as templates) for direct CLI ↔ GCS transfer
-- Hub coordinates sync, Runtime Host uploads/applies via rclone
+- Hub coordinates sync, Runtime Broker uploads/applies via rclone
 - Shared `pkg/transfer` package provides common file transfer functionality
 - Incremental sync via SHA-256 content hashing (skip unchanged files)
 
@@ -146,8 +146,8 @@ scion start my-agent --type custom-claude "Fix the login bug"
 - GCS storage via rclone
 - Signed URL generation
 - Template resolution in agent creation
-- HTTP dispatch to Runtime Host
-- Template hydration on Runtime Host
+- HTTP dispatch to Runtime Broker
+- Template hydration on Runtime Broker
 
 **Configuration Required:**
 
@@ -168,26 +168,26 @@ scion start my-agent --type custom-claude "Fix the login bug"
        bucket: "scion-hub-dev"
    ```
 
-4. **Runtime Host Template Cache:**
+4. **Runtime Broker Template Cache:**
    ```yaml
-   runtimeHost:
+   runtimeBroker:
      templateCache:
        path: "~/.scion/cache/templates"
        maxSize: "100MB"
    ```
 
-**Gap: Runtime Host Endpoint Discovery**
+**Gap: Runtime Broker Endpoint Discovery**
 
-When Hub dispatches to Runtime Host, it needs the host endpoint URL. Currently:
+When Hub dispatches to Runtime Broker, it needs the host endpoint URL. Currently:
 - Host registers with Hub and provides endpoint URL
 - Hub stores endpoint in database
 - Dispatcher looks up endpoint for dispatch
 
-**Resolved:** Runtime Hosts behind NAT use the WebSocket control channel:
-- Host initiates WebSocket connection to Hub at `/api/v1/runtime-hosts/connect`
+**Resolved:** Runtime Brokers behind NAT use the WebSocket control channel:
+- Host initiates WebSocket connection to Hub at `/api/v1/runtime-brokers/connect`
 - Hub tunnels HTTP requests through the control channel
 - No external endpoint URL needed for NAT-ed hosts
-- See `runtimehost-websocket.md` Section 9 for implementation details
+- See `runtimebroker-websocket.md` Section 9 for implementation details
 
 ---
 
@@ -198,21 +198,21 @@ When Hub dispatches to Runtime Host, it needs the host endpoint URL. Currently:
 **Commands:**
 ```bash
 scion attach my-agent
-# Connects via WebSocket through Hub to Runtime Host
+# Connects via WebSocket through Hub to Runtime Broker
 ```
 
 **What Happens:**
 1. CLI calls Hub to get agent details and verify running status
 2. CLI establishes WebSocket connection to Hub at `/api/v1/agents/{id}/pty`
-3. Hub opens PTY stream to Runtime Host via control channel
-4. Runtime Host executes `docker exec -i {container} tmux attach-session -t scion`
-5. Bidirectional I/O is relayed: CLI ↔ Hub ↔ Runtime Host ↔ Container
+3. Hub opens PTY stream to Runtime Broker via control channel
+4. Runtime Broker executes `docker exec -i {container} tmux attach-session -t scion`
+5. Bidirectional I/O is relayed: CLI ↔ Hub ↔ Runtime Broker ↔ Container
 
 **Implementation Files:**
 - `pkg/hub/pty_handlers.go` - Hub PTY WebSocket endpoint
 - `pkg/hub/controlchannel.go` - Stream multiplexing to hosts
-- `pkg/runtimehost/pty_handlers.go` - Docker exec and PTY handling
-- `pkg/runtimehost/controlchannel.go` - Control channel client
+- `pkg/runtimebroker/pty_handlers.go` - Docker exec and PTY handling
+- `pkg/runtimebroker/controlchannel.go` - Control channel client
 - `pkg/wsclient/pty.go` - CLI WebSocket client
 - `cmd/attach.go` - Updated to use WebSocket when Hub enabled
 
@@ -247,8 +247,8 @@ scion sync to my-agent --exclude "*.log" --exclude "tmp/**"
 
 **What Happens (Sync FROM):**
 1. CLI calls Hub API: `POST /api/v1/agents/{id}/workspace/sync-from`
-2. Hub tunnels request to Runtime Host via control channel
-3. Runtime Host uploads workspace to GCS using rclone
+2. Hub tunnels request to Runtime Broker via control channel
+3. Runtime Broker uploads workspace to GCS using rclone
 4. Hub generates signed download URLs for each file
 5. CLI downloads files directly from GCS (incremental - skips unchanged)
 
@@ -259,13 +259,13 @@ scion sync to my-agent --exclude "*.log" --exclude "tmp/**"
 4. Hub returns signed upload URLs for new/changed files only
 5. CLI uploads files directly to GCS
 6. CLI calls Hub API: `POST /api/v1/agents/{id}/workspace/sync-to/finalize`
-7. Hub tunnels apply request to Runtime Host
-8. Runtime Host downloads from GCS and applies to container workspace
+7. Hub tunnels apply request to Runtime Broker
+8. Runtime Broker downloads from GCS and applies to container workspace
 
 **Key Implementation Files:**
 - `cmd/sync.go` - CLI sync command with hosted mode
 - `pkg/hub/workspace_handlers.go` - Hub workspace endpoints
-- `pkg/runtimehost/workspace_handlers.go` - Runtime Host handlers
+- `pkg/runtimebroker/workspace_handlers.go` - Runtime Broker handlers
 - `pkg/hubclient/workspace.go` - Hub client workspace service
 - `pkg/transfer/` - Shared file transfer package
 
@@ -291,8 +291,8 @@ scion stop my-agent
 
 **What Happens:**
 1. CLI calls Hub API: `POST /api/v1/agents/{id}/stop`
-2. Hub dispatches to Runtime Host via HTTP
-3. Runtime Host stops the agent container
+2. Hub dispatches to Runtime Broker via HTTP
+3. Runtime Broker stops the agent container
 
 **No Implementation Work Required.**
 
@@ -311,8 +311,8 @@ scion stop my-agent --rm
 
 **What Happens:**
 1. CLI calls Hub API: `DELETE /api/v1/agents/{id}`
-2. Hub dispatches to Runtime Host via HTTP
-3. Runtime Host stops container, removes files, optionally removes git branch
+2. Hub dispatches to Runtime Broker via HTTP
+3. Runtime Broker stops container, removes files, optionally removes git branch
 4. Hub removes agent record from database
 
 **No Implementation Work Required.**
@@ -325,7 +325,7 @@ scion stop my-agent --rm
 **Goal:** Verify existing functionality works end-to-end
 
 1. Set up GCS bucket with proper permissions
-2. Configure Hub and Runtime Host settings
+2. Configure Hub and Runtime Broker settings
 3. Test template push/pull workflow
 4. Test agent create/start/stop/delete workflow
 5. Document any issues discovered
@@ -334,7 +334,7 @@ scion stop my-agent --rm
 **Goal:** Enable syncing workspace files
 
 1. Add `workspace` prefix to Hub storage
-2. Implement sync trigger on Runtime Host (on-demand initially)
+2. Implement sync trigger on Runtime Broker (on-demand initially)
 3. Add Hub endpoint for workspace sync metadata
 4. Update `scion sync` command for hosted mode
 5. Test with rclone
@@ -343,7 +343,7 @@ scion stop my-agent --rm
 **Goal:** Enable interactive agent sessions
 
 1. Implement WebSocket PTY endpoint on Hub
-2. Implement PTY attachment on Runtime Host
+2. Implement PTY attachment on Runtime Broker
 3. Update CLI attach command to use WebSocket
 4. Handle terminal resize, disconnect, reconnect
 5. Test interactive sessions
@@ -393,9 +393,9 @@ How should CLI authenticate WebSocket connections for PTY?
 
 **Recommendation:** Option B - more secure, aligns with design doc
 
-### Q4: Runtime Host Endpoint Registration
+### Q4: Runtime Broker Endpoint Registration
 
-How does Runtime Host specify its externally-reachable endpoint?
+How does Runtime Broker specify its externally-reachable endpoint?
 
 **Options:**
 - **A. Explicit flag:** `scion server start --endpoint http://myhost:9800`
@@ -410,14 +410,14 @@ How does Runtime Host specify its externally-reachable endpoint?
 
 ### Local Emulation (Single Machine)
 
-Run Hub and Runtime Host as separate processes:
+Run Hub and Runtime Broker as separate processes:
 
 ```bash
 # Terminal 1: Start Hub
 scion server start --enable-hub --hub-port 9000
 
-# Terminal 2: Start Runtime Host (different port)
-scion server start --enable-runtime-host --host-port 9800 \
+# Terminal 2: Start Runtime Broker (different port)
+scion server start --enable-runtime-broker --host-port 9800 \
   --hub-endpoint http://localhost:9000 \
   --endpoint http://localhost:9800
 
@@ -437,7 +437,7 @@ scion delete my-agent
 
 Same commands but with actual different machines:
 - Hub: `hub.example.com:9000`
-- Runtime Host: `host.example.com:9800`
+- Runtime Broker: `host.example.com:9800`
 - CLI: Developer laptop
 
 ---
@@ -448,7 +448,7 @@ The milestone is complete when:
 
 1. ✅ CLI can authenticate with Hub
 2. ✅ Local template can be pushed to Hub (GCS)
-3. ✅ Agent can be started on remote Runtime Host using pushed template
+3. ✅ Agent can be started on remote Runtime Broker using pushed template
 4. ✅ CLI can attach to remote agent and interact via tmux
 5. ✅ Workspace can be synced from remote agent to local machine
 6. ✅ Agent can be stopped via CLI
@@ -456,7 +456,7 @@ The milestone is complete when:
 
 **7 of 7 scenarios complete.** 🎉 Milestone achieved!
 
-All scenarios work with Hub and Runtime Host running as separate processes.
+All scenarios work with Hub and Runtime Broker running as separate processes.
 
 ---
 
@@ -467,8 +467,8 @@ All scenarios work with Hub and Runtime Host running as separate processes.
 | [status.md](status.md) | Overall implementation status |
 | [hosted-architecture.md](hosted-architecture.md) | System design |
 | [hosted-templates.md](hosted-templates.md) | Template management design |
-| [runtimehost-websocket.md](runtimehost-websocket.md) | WebSocket/PTY design |
+| [runtimebroker-websocket.md](runtimebroker-websocket.md) | WebSocket/PTY design |
 | [hub-api.md](hub-api.md) | Hub API specification |
-| [runtime-host-api.md](runtime-host-api.md) | Runtime Host API specification |
+| [runtime-broker-api.md](runtime-broker-api.md) | Runtime Broker API specification |
 | [hub-api-testing-walkthrough.md](hub-api-testing-walkthrough.md) | Hub API testing guide |
-| [runtime-host-testing-walkthrough.md](runtime-host-testing-walkthrough.md) | Runtime Host testing guide |
+| [runtime-broker-testing-walkthrough.md](runtime-broker-testing-walkthrough.md) | Runtime Broker testing guide |

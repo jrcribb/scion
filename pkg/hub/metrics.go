@@ -52,7 +52,7 @@ type MetricsRecorder interface {
 	// RecordRotation records a secret rotation.
 	RecordRotation(brokerID string)
 
-	// RecordDispatch records a dispatch attempt to a runtime host.
+	// RecordDispatch records a dispatch attempt to a runtime broker.
 	RecordDispatch(brokerID string, operation string, success bool, latency time.Duration)
 
 	// SetConnectedHosts sets the current number of connected hosts.
@@ -139,7 +139,7 @@ func (m *HostAuthMetrics) RecordRotation(brokerID string) {
 	m.rotations.Add(1)
 }
 
-// RecordDispatch records a dispatch attempt to a runtime host.
+// RecordDispatch records a dispatch attempt to a runtime broker.
 func (m *HostAuthMetrics) RecordDispatch(brokerID string, operation string, success bool, latency time.Duration) {
 	m.dispatchAttempts.Add(1)
 	if !success {

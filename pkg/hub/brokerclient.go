@@ -19,7 +19,7 @@ import (
 
 // AuthenticatedHostClient is an HTTP-based RuntimeBrokerClient that signs
 // outgoing requests with HMAC authentication. This allows the Hub to make
-// authenticated requests to Runtime Hosts.
+// authenticated requests to Runtime Brokers.
 type AuthenticatedHostClient struct {
 	httpClient *http.Client
 	store      store.Store
@@ -41,15 +41,15 @@ func NewAuthenticatedHostClient(s store.Store, debug bool) *AuthenticatedHostCli
 func (c *AuthenticatedHostClient) getBrokerSecret(ctx context.Context, brokerID string) ([]byte, error) {
 	secret, err := c.store.GetBrokerSecret(ctx, brokerID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get host secret: %w", err)
+		return nil, fmt.Errorf("failed to get broker secret: %w", err)
 	}
 
 	if secret.Status != store.BrokerSecretStatusActive {
-		return nil, fmt.Errorf("host secret is %s", secret.Status)
+		return nil, fmt.Errorf("broker secret is %s", secret.Status)
 	}
 
 	if !secret.ExpiresAt.IsZero() && time.Now().After(secret.ExpiresAt) {
-		return nil, fmt.Errorf("host secret has expired")
+		return nil, fmt.Errorf("broker secret has expired")
 	}
 
 	return secret.SecretKey, nil
@@ -104,7 +104,7 @@ func (c *AuthenticatedHostClient) doRequest(ctx context.Context, brokerID, metho
 	return c.httpClient.Do(req)
 }
 
-// CreateAgent creates an agent on a remote runtime host with HMAC authentication.
+// CreateAgent creates an agent on a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedHostClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
 	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(hostEndpoint, "/"))
 
@@ -121,7 +121,7 @@ func (c *AuthenticatedHostClient) CreateAgent(ctx context.Context, brokerID, hos
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result RemoteAgentResponse
@@ -132,7 +132,7 @@ func (c *AuthenticatedHostClient) CreateAgent(ctx context.Context, brokerID, hos
 	return &result, nil
 }
 
-// StartAgent starts an agent on a remote runtime host with HMAC authentication.
+// StartAgent starts an agent on a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedHostClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
@@ -144,13 +144,13 @@ func (c *AuthenticatedHostClient) StartAgent(ctx context.Context, brokerID, host
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
 }
 
-// StopAgent stops an agent on a remote runtime host with HMAC authentication.
+// StopAgent stops an agent on a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedHostClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/stop", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
@@ -162,13 +162,13 @@ func (c *AuthenticatedHostClient) StopAgent(ctx context.Context, brokerID, hostE
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
 }
 
-// RestartAgent restarts an agent on a remote runtime host with HMAC authentication.
+// RestartAgent restarts an agent on a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedHostClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/restart", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
@@ -180,13 +180,13 @@ func (c *AuthenticatedHostClient) RestartAgent(ctx context.Context, brokerID, ho
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
 }
 
-// DeleteAgent deletes an agent from a remote runtime host with HMAC authentication.
+// DeleteAgent deletes an agent from a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedHostClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s?deleteFiles=%t&removeBranch=%t",
 		strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID), deleteFiles, removeBranch)
@@ -199,13 +199,13 @@ func (c *AuthenticatedHostClient) DeleteAgent(ctx context.Context, brokerID, hos
 
 	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil
 }
 
-// MessageAgent sends a message to an agent on a remote runtime host with HMAC authentication.
+// MessageAgent sends a message to an agent on a remote runtime broker with HMAC authentication.
 func (c *AuthenticatedHostClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/message", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
@@ -225,7 +225,7 @@ func (c *AuthenticatedHostClient) MessageAgent(ctx context.Context, brokerID, ho
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil

@@ -1,5 +1,5 @@
 // Package wsprotocol defines message types and constants used for WebSocket
-// communication between the Hub and Runtime Hosts.
+// communication between the Hub and Runtime Brokers.
 package wsprotocol
 
 import (
@@ -7,15 +7,15 @@ import (
 	"time"
 )
 
-// Control channel message types (Hub ↔ Runtime Host)
+// Control channel message types (Hub ↔ Runtime Broker)
 const (
-	// TypeConnect is sent by Runtime Host to initiate connection
+	// TypeConnect is sent by Runtime Broker to initiate connection
 	TypeConnect = "connect"
 	// TypeConnected is sent by Hub to confirm connection
 	TypeConnected = "connected"
 	// TypeRequest is sent by Hub to tunnel an HTTP request
 	TypeRequest = "request"
-	// TypeResponse is sent by Runtime Host with HTTP response
+	// TypeResponse is sent by Runtime Broker with HTTP response
 	TypeResponse = "response"
 	// TypeStream is sent for streaming data (e.g., PTY)
 	TypeStream = "stream"
@@ -63,12 +63,12 @@ type Envelope struct {
 	Type string `json:"type"`
 }
 
-// ConnectMessage is sent by Runtime Host when establishing control channel.
+// ConnectMessage is sent by Runtime Broker when establishing control channel.
 type ConnectMessage struct {
 	Type      string   `json:"type"` // Always "connect"
 	BrokerID string   `json:"brokerId"`
 	Version   string   `json:"version"`
-	Groves    []string `json:"groves,omitempty"`    // Grove IDs this host serves
+	Groves    []string `json:"groves,omitempty"`    // Grove IDs this broker serves
 	Timestamp int64    `json:"timestamp,omitempty"` // Unix timestamp
 }
 
@@ -187,12 +187,12 @@ type PTYResizeMessage struct {
 const (
 	ErrCodeInvalidMessage   = "invalid_message"
 	ErrCodeAuthFailed       = "auth_failed"
-	ErrCodeHostNotFound     = "host_not_found"
+	ErrCodeBrokerNotFound     = "broker_not_found"
 	ErrCodeAgentNotFound    = "agent_not_found"
 	ErrCodeStreamNotFound   = "stream_not_found"
 	ErrCodeStreamFailed     = "stream_failed"
 	ErrCodeTimeout          = "timeout"
-	ErrCodeHostDisconnected = "host_disconnected"
+	ErrCodeBrokerDisconnected = "broker_disconnected"
 	ErrCodeInternalError    = "internal_error"
 )
 
@@ -205,7 +205,7 @@ func ParseEnvelope(data []byte) (*Envelope, error) {
 	return &env, nil
 }
 
-// NewConnectMessage creates a connect message for a runtime host.
+// NewConnectMessage creates a connect message for a runtime broker.
 func NewConnectMessage(brokerID, version string, groves []string) *ConnectMessage {
 	return &ConnectMessage{
 		Type:      TypeConnect,

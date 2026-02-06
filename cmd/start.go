@@ -38,7 +38,7 @@ func init() {
 
 	startCmd.Flags().StringVarP(&workspace, "workspace", "w", "", "Host path to mount as /workspace")
 
-	startCmd.Flags().StringVar(&runtimeBrokerID, "broker", "", "Preferred runtime host ID or name")
+	startCmd.Flags().StringVar(&runtimeBrokerID, "broker", "", "Preferred runtime broker ID or name")
 
 	// Template resolution flags for Hub mode (Section 9.4)
 	startCmd.Flags().BoolVar(&uploadTemplate, "upload-template", false, "Automatically upload local template to Hub if not found")

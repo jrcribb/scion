@@ -226,13 +226,13 @@ curl -s -X POST http://localhost:9810/api/v1/users \
 curl -s http://localhost:9810/api/v1/users | jq
 ```
 
-## 7. Runtime Host Management
+## 7. Runtime Broker Management
 
 Runtime hosts are typically created via grove registration with a host payload, but can be listed:
 
-### List Runtime Hosts
+### List Runtime Brokers
 ```bash
-curl -s http://localhost:9810/api/v1/runtime-hosts | jq
+curl -s http://localhost:9810/api/v1/runtime-brokers | jq
 ```
 
 ### Register Grove with Host
@@ -258,7 +258,7 @@ curl -s -X POST http://localhost:9810/api/v1/groves/register \
   }' | jq
 ```
 
-This creates both a grove and a runtime host, returning a host token.
+This creates both a grove and a runtime broker, returning a host token.
 
 ## 8. Error Handling
 

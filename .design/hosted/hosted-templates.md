@@ -5,7 +5,7 @@
 
 ## 1. Overview
 
-This document specifies the design for managing agent templates in the hosted Scion architecture. In the hosted model, templates are stored in cloud storage (buckets) and registered with the Hub for discovery, access control, and distribution to Runtime Hosts.
+This document specifies the design for managing agent templates in the hosted Scion architecture. In the hosted model, templates are stored in cloud storage (buckets) and registered with the Hub for discovery, access control, and distribution to Runtime Brokers.
 
 ### 1.1. Current Template System (Solo Mode)
 
@@ -13,16 +13,16 @@ In solo mode, templates are:
 - **Embedded in binary:** Default templates (claude, gemini, codex, opencode) are compiled into the `scion` binary via `//go:embed`
 - **Seeded on init:** `scion init` copies templates to `.scion/templates/` in the grove
 - **Locally stored:** Each grove maintains its own template copies on the filesystem
-- **Resolved at agent creation:** The Runtime Host reads template files from disk when starting an agent
+- **Resolved at agent creation:** The Runtime Broker reads template files from disk when starting an agent
 - **URI-based remote templates:** Solo mode already supports referencing templates via URIs to remote locations; this capability remains independent of Hub-based template management
 
 ### 1.2. Hosted Template Requirements
 
 The hosted architecture introduces new requirements:
-- **Centralized registry:** Templates must be discoverable across distributed Runtime Hosts
+- **Centralized registry:** Templates must be discoverable across distributed Runtime Brokers
 - **Scope hierarchy:** Templates can be global (platform-wide), grove-scoped, or user-scoped
 - **Cloud storage:** Template files must be stored durably in buckets, not just local filesystems
-- **Hydration on demand:** Runtime Hosts must fetch templates from storage when creating agents
+- **Hydration on demand:** Runtime Brokers must fetch templates from storage when creating agents
 - **Change tracking:** Templates track when and by whom they were last modified
 - **Access control:** Template visibility and modification rights must respect ownership (deferred to comprehensive access control design)
 
@@ -33,7 +33,7 @@ The hosted architecture introduces new requirements:
 | Storage backend | Hub storage bucket with `/templates` prefix | Durable, scalable; templates share bucket with other Hub data |
 | Registry | Hub database | Centralized metadata, search, access control |
 | Distribution | Pull-based (Host fetches from bucket) | Simpler than push; works across NAT/firewalls |
-| Caching | Local cache on Runtime Hosts | Avoid re-fetching unchanged templates |
+| Caching | Local cache on Runtime Brokers | Avoid re-fetching unchanged templates |
 | Content hashing | SHA-256 hash of contents | Reliable cache invalidation |
 | Versioning | Deferred | GCS native versioning available for future use |
 
@@ -64,7 +64,7 @@ The Hub maintains a general storage bucket for all cloud storage needs. Template
                            │                       │                       │
                            ▼                       │                       ▼
                     ┌─────────────┐                │              ┌─────────────────┐
-                    │   Scion     │                │              │  Runtime Host   │
+                    │   Scion     │                │              │  Runtime Broker   │
                     │   Hub       │◄───────────────┘              │                 │
                     │             │                               │  ┌───────────┐  │
                     │  Template   │  1. Register template         │  │  Template │  │
@@ -107,7 +107,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Hub as Scion Hub
-    participant Host as Runtime Host
+    participant Host as Runtime Broker
     participant Cache as Template Cache
     participant Bucket as Cloud Bucket
 
@@ -584,15 +584,15 @@ Note: Default application credentials from `gcloud auth application-default logi
 
 ### 6.5. Multi-Region Considerations
 
-For globally distributed Runtime Hosts, administrators can configure the storage bucket as a multi-region or dual-region bucket in their cloud provider. Scion interacts with the bucket by name and does not manage replication directly.
+For globally distributed Runtime Brokers, administrators can configure the storage bucket as a multi-region or dual-region bucket in their cloud provider. Scion interacts with the bucket by name and does not manage replication directly.
 
 ---
 
-## 7. Runtime Host Integration
+## 7. Runtime Broker Integration
 
 ### 7.1. Template Cache
 
-Runtime Hosts maintain a local cache of templates to avoid repeated downloads.
+Runtime Brokers maintain a local cache of templates to avoid repeated downloads.
 
 **Cache Structure:**
 ```
@@ -624,7 +624,7 @@ Runtime Hosts maintain a local cache of templates to avoid repeated downloads.
 LRU eviction when cache exceeds configured size:
 
 ```yaml
-runtimeHost:
+runtimeBroker:
   templateCache:
     maxSize: "100MB"
     evictionPolicy: "lru"
@@ -633,7 +633,7 @@ runtimeHost:
 
 ### 7.3. Template Hydration Flow
 
-When creating an agent, the Runtime Host hydrates the template:
+When creating an agent, the Runtime Broker hydrates the template:
 
 ```
 1. Receive CreateAgent command with templateId
@@ -651,7 +651,7 @@ When creating an agent, the Runtime Host hydrates the template:
 
 ### 7.4. Template Resolution in CreateAgent
 
-The Hub resolves templates before dispatching to Runtime Hosts:
+The Hub resolves templates before dispatching to Runtime Brokers:
 
 ```json
 {
@@ -673,7 +673,7 @@ The Hub resolves templates before dispatching to Runtime Hosts:
 }
 ```
 
-The Runtime Host can fetch directly from `storageUri` or request download URLs from Hub.
+The Runtime Broker can fetch directly from `storageUri` or request download URLs from Hub.
 
 ---
 
@@ -932,10 +932,10 @@ scion template push --all
 
 ### 13.2. Sync Local Cache
 
-Runtime Hosts sync their cache with Hub on startup:
+Runtime Brokers sync their cache with Hub on startup:
 
 ```yaml
-runtimeHost:
+runtimeBroker:
   templateSync:
     onStartup: true              # Sync cache on startup
     interval: "1h"               # Periodic sync
@@ -1028,10 +1028,10 @@ Template operations will emit events:
 - [x] CLI `template sync`, `template push`, and `template pull`
 
 ### Phase 3: Runtime Integration ✓
-- [x] Template cache on Runtime Host (`pkg/templatecache/cache.go`)
+- [x] Template cache on Runtime Broker (`pkg/templatecache/cache.go`)
 - [x] Hydration during agent creation (`pkg/templatecache/hydrator.go`)
 - [x] Cache eviction and management (LRU eviction in `cache.go`)
-- [x] Hub connectivity error handling (`pkg/runtimehost/errors.go`, `hydrator.go`)
+- [x] Hub connectivity error handling (`pkg/runtimebroker/errors.go`, `hydrator.go`)
 
 ### Phase 4: Advanced Features
 - [ ] Template inheritance
@@ -1062,7 +1062,7 @@ The following questions have been resolved:
 ## 18. References
 
 - **Hub API Specification:** `hub-api.md` Section 6
-- **Runtime Host API:** `runtime-host-api.md`
+- **Runtime Broker API:** `runtime-broker-api.md`
 - **Hosted Architecture:** `hosted-architecture.md`
 - **Current Template System:** `pkg/config/embeds/`
 - **Integration Test Script:** `scripts/template-integration-test.sh`

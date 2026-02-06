@@ -5,7 +5,7 @@
 
 ## 1. Executive Summary
 
-The Scion Hosted architecture is partially implemented. The core "backend" components (Hub API, Runtime Host API, Client Libraries) have a solid foundation in Go. The "frontend" (Web Dashboard) has a parallel implementation in Node.js (Koa + Lit SSR) but is **not yet integrated** into the main `scion` Go binary as intended by the single-binary design goal.
+The Scion Hosted architecture is partially implemented. The core "backend" components (Hub API, Runtime Broker API, Client Libraries) have a solid foundation in Go. The "frontend" (Web Dashboard) has a parallel implementation in Node.js (Koa + Lit SSR) but is **not yet integrated** into the main `scion` Go binary as intended by the single-binary design goal.
 
 ## 2. Component Status Review
 
@@ -18,9 +18,9 @@ The Scion Hosted architecture is partially implemented. The core "backend" compo
 *   **Missing / Gaps:**
     *   **NATS / Real-time Events:** No implementation found for NATS broadcasting or event loops in `pkg/hub`. This is critical for the "Snapshot + Delta" pattern described in `web-frontend-design.md`.
     *   **Secrets Management:** `pkg/hubclient` has secrets logic, but need to confirm server-side encryption/storage implementation.
-    *   **WebSocket Control Plane:** While `pkg/runtimehost` exists, the complex WebSocket control channel for NAT traversal (Hub <-> Host) needs verification of full implementation beyond simple HTTP.
+    *   **WebSocket Control Plane:** While `pkg/runtimebroker` exists, the complex WebSocket control channel for NAT traversal (Hub <-> Host) needs verification of full implementation beyond simple HTTP.
 
-### 2.2 Runtime Host API (`pkg/runtimehost`)
+### 2.2 Runtime Broker API (`pkg/runtimebroker`)
 *   **Status:** ✅ **Partially Complete**
 *   **Implemented:**
     *   Server structure and mode switching (Connected vs Read-Only).
@@ -29,7 +29,7 @@ The Scion Hosted architecture is partially implemented. The core "backend" compo
 *   **Missing:**
     *   Robust status reporting loop (dependent on NATS/Events).
 
-### 2.3 Client Libraries (`pkg/hubclient`, `pkg/hostclient`)
+### 2.3 Client Libraries (`pkg/hubclient`, `pkg/brokerclient`)
 *   **Status:** ✅ **Complete**
 *   **Implemented:**
     *   Full CRUD for Agents, Groves, Users.

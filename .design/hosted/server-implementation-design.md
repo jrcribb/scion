@@ -7,7 +7,7 @@
 
 The Scion Server is the network-exposed component that enables distributed agent management. Three server components are implemented within the same `scion` binary, activated via the `scion server` command subgroup:
 
-1. **Runtime Host API** - Agent lifecycle management on compute nodes
+1. **Runtime Broker API** - Agent lifecycle management on compute nodes
 2. **Hub API** - Centralized state management, routing, and coordination
 3. **Web Frontend** - Browser-based dashboard for user interaction
 
@@ -48,7 +48,7 @@ scion server start [flags]
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--enable-runtime-host` | `false` | Enable the Runtime Host API |
+| `--enable-runtime-broker` | `false` | Enable the Runtime Broker API |
 | `--enable-hub` | `false` | Enable the Hub API |
 | `--enable-web` | `false` | Enable the Web Frontend |
 | `--enable-all` | `false` | Enable all servers (convenience) |
@@ -70,8 +70,8 @@ scion server start [flags]
 **Examples:**
 
 ```bash
-# Start Runtime Host API in foreground
-scion server start --enable-runtime-host
+# Start Runtime Broker API in foreground
+scion server start --enable-runtime-broker
 
 # Start Hub API as background daemon
 scion server start --enable-hub --background
@@ -108,7 +108,7 @@ scion server status [flags]
 ```
 Scion Server Status
 -------------------
-Runtime Host API: running (port 9800)
+Runtime Broker API: running (port 9800)
   Health: healthy
   Uptime: 2h 15m
   Agents: 5
@@ -133,7 +133,7 @@ Each server has a dedicated port that remains consistent regardless of deploymen
 
 | Server | Default Port | Purpose |
 |--------|--------------|---------|
-| Runtime Host API | `9800` | Agent lifecycle, PTY, exec |
+| Runtime Broker API | `9800` | Agent lifecycle, PTY, exec |
 | Hub API | `9810` | State management, routing, WebSocket |
 | Web Frontend | `9820` | Browser dashboard, static assets |
 
@@ -147,7 +147,7 @@ Each server has a dedicated port that remains consistent regardless of deploymen
 
 ```yaml
 server:
-  runtimeHost:
+  runtimeBroker:
     port: 9800
     host: "0.0.0.0"
   hub:
@@ -178,8 +178,8 @@ Environment variables follow the pattern: `SCION_<SECTION>_<KEY>`
 
 | Variable | Maps To |
 |----------|---------|
-| `SCION_SERVER_RUNTIME_HOST_PORT` | `server.runtimeHost.port` |
-| `SCION_SERVER_RUNTIME_HOST_ENABLED` | `server.runtimeHost.enabled` |
+| `SCION_SERVER_RUNTIME_HOST_PORT` | `server.runtimeBroker.port` |
+| `SCION_SERVER_RUNTIME_HOST_ENABLED` | `server.runtimeBroker.enabled` |
 | `SCION_SERVER_HUB_PORT` | `server.hub.port` |
 | `SCION_SERVER_HUB_ENABLED` | `server.hub.enabled` |
 | `SCION_SERVER_HUB_DATABASE_URL` | `server.hub.database.url` |
@@ -193,8 +193,8 @@ Environment variables follow the pattern: `SCION_<SECTION>_<KEY>`
 
 ```yaml
 server:
-  # Runtime Host API settings
-  runtimeHost:
+  # Runtime Broker API settings
+  runtimeBroker:
     enabled: false
     port: 9800
     host: "0.0.0.0"
@@ -290,9 +290,9 @@ server:
 
 ### 4.4 Hub Endpoint Auto-Discovery
 
-When the Runtime Host API needs to communicate with a Hub:
+When the Runtime Broker API needs to communicate with a Hub:
 
-1. If `server.runtimeHost.hubEndpoint` is explicitly set, use it
+1. If `server.runtimeBroker.hubEndpoint` is explicitly set, use it
 2. If Hub API is enabled in same process, use `localhost:<hub-port>`
 3. If neither, Hub integration is disabled (Solo mode)
 
@@ -340,10 +340,10 @@ When the Runtime Host API needs to communicate with a Hub:
    a. Connect to database
    b. Run migrations
    c. Initialize Hub API server
-6. If Runtime Host enabled:
+6. If Runtime Broker enabled:
    a. Detect available runtimes (Docker, K8s, Apple)
    b. Initialize agent manager
-   c. Initialize Runtime Host API server
+   c. Initialize Runtime Broker API server
    d. Connect to Hub (if configured)
 7. If Web Frontend enabled:
    a. Load/verify static assets
@@ -369,7 +369,7 @@ When the Runtime Host API needs to communicate with a Hub:
 4. If Hub enabled:
    a. Send disconnect to connected hosts
    b. Close WebSocket connections gracefully
-5. If Runtime Host enabled:
+5. If Runtime Broker enabled:
    a. Send heartbeat with "shutting_down" status
    b. Close control channel to Hub
 6. Wait for in-flight requests (up to timeout)
@@ -392,7 +392,7 @@ When the Runtime Host API needs to communicate with a Hub:
 
 ## 6. Health Endpoints
 
-### 6.1 Runtime Host API Health
+### 6.1 Runtime Broker API Health
 
 ```
 GET /healthz
@@ -466,7 +466,7 @@ GET /healthz
 
 **Readiness conditions:**
 - Database connected and migrated
-- At least one runtime available (Runtime Host)
+- At least one runtime available (Runtime Broker)
 - Not in shutdown mode
 
 ---
@@ -515,13 +515,13 @@ server:
 
 **Text (default, development):**
 ```
-2025-01-24T10:30:00Z INFO  server starting port=9800 api=runtime-host
+2025-01-24T10:30:00Z INFO  server starting port=9800 api=runtime-broker
 2025-01-24T10:30:01Z INFO  agent created agent_id=abc123 grove=my-project
 ```
 
 **JSON (production, structured):**
 ```json
-{"time":"2025-01-24T10:30:00Z","level":"info","msg":"server starting","port":9800,"api":"runtime-host"}
+{"time":"2025-01-24T10:30:00Z","level":"info","msg":"server starting","port":9800,"api":"runtime-broker"}
 ```
 
 ### 8.2 Log Fields
@@ -533,7 +533,7 @@ Common fields included in all log entries:
 | `time` | Timestamp (RFC3339) |
 | `level` | Log level |
 | `msg` | Log message |
-| `api` | Which API (runtime-host, hub) |
+| `api` | Which API (runtime-broker, hub) |
 | `request_id` | Request correlation ID |
 | `duration_ms` | Request duration (for HTTP logs) |
 
@@ -553,7 +553,7 @@ All HTTP requests are logged with:
 
 Exposed on separate port (default 9801) at `/metrics`:
 
-**Runtime Host API:**
+**Runtime Broker API:**
 ```
 scion_runtime_agents_total{grove="...",status="running"} 5
 scion_runtime_container_start_duration_seconds_bucket{le="10"} 42
@@ -620,7 +620,7 @@ CREATE TABLE env_vars (
     id          TEXT PRIMARY KEY,
     key         TEXT NOT NULL,
     value       TEXT NOT NULL,
-    scope       TEXT NOT NULL,             -- 'user', 'grove', 'runtime_host'
+    scope       TEXT NOT NULL,             -- 'user', 'grove', 'runtime_broker'
     scope_id    TEXT NOT NULL,             -- user_id, grove_id, or host_id
     description TEXT,
     sensitive   BOOLEAN DEFAULT FALSE,     -- mask in UI/logs
@@ -642,7 +642,7 @@ CREATE TABLE secrets (
     id          TEXT PRIMARY KEY,
     key         TEXT NOT NULL,
     value       TEXT NOT NULL,             -- Future: encrypted blob
-    scope       TEXT NOT NULL,             -- 'user', 'grove', 'runtime_host'
+    scope       TEXT NOT NULL,             -- 'user', 'grove', 'runtime_broker'
     scope_id    TEXT NOT NULL,             -- user_id, grove_id, or host_id
     description TEXT,
     version     INTEGER DEFAULT 1,         -- incremented on update
@@ -797,7 +797,7 @@ server:
 PTY and event WebSocket connections are proxied through the Web Frontend to the Hub API, enabling cookie-based authentication for browsers:
 
 ```
-Browser WS ──▶ Web Frontend ──▶ Hub API ──▶ Runtime Host
+Browser WS ──▶ Web Frontend ──▶ Hub API ──▶ Runtime Broker
   :9820/ws/pty    (proxy)       :9810      (control channel)
 ```
 
@@ -817,13 +817,13 @@ The Web Frontend implementation will be specified in a dedicated document. Consi
 ### 13.1 Developer Laptop (Solo + Read-Only)
 
 ```bash
-# Start Runtime Host in read-only mode, reporting to team Hub
-scion server start --enable-runtime-host --background
+# Start Runtime Broker in read-only mode, reporting to team Hub
+scion server start --enable-runtime-broker --background
 ```
 
 ```yaml
 server:
-  runtimeHost:
+  runtimeBroker:
     enabled: true
     mode: "read-only"
     hubEndpoint: "https://hub.team.example.com"
@@ -832,7 +832,7 @@ server:
 ### 13.2 Self-Hosted Hub (All-in-One)
 
 ```bash
-# Start all servers (Hub + Web + Runtime Host)
+# Start all servers (Hub + Web + Runtime Broker)
 scion server start --enable-all --background
 ```
 
@@ -849,7 +849,7 @@ server:
     auth:
       provider: "oidc"
       clientId: "scion-dashboard"
-  runtimeHost:
+  runtimeBroker:
     enabled: true
     mode: "connected"
     # hubEndpoint auto-detected as localhost:9810
@@ -859,16 +859,16 @@ server:
     keyFile: "/etc/scion/tls/key.pem"
 ```
 
-### 13.3 Kubernetes Runtime Host
+### 13.3 Kubernetes Runtime Broker
 
 ```bash
-# Runtime Host only, Hub is external
-scion server start --enable-runtime-host
+# Runtime Broker only, Hub is external
+scion server start --enable-runtime-broker
 ```
 
 ```yaml
 server:
-  runtimeHost:
+  runtimeBroker:
     enabled: true
     mode: "connected"
     hubEndpoint: "https://hub.scion.cloud"
@@ -925,7 +925,7 @@ server:
 
 ### 14.2 Authentication
 
-- Runtime Host API: Bearer token from Hub registration
+- Runtime Broker API: Bearer token from Hub registration
 - Hub API: User bearer tokens, API keys, or agent/host tokens
 - Web Frontend: Session cookies, OAuth tokens
 - WebSocket: Query parameter tokens or ticket-based auth
@@ -974,7 +974,7 @@ server:
 - [ ] PID file management
 - [ ] Health endpoints
 
-### Phase 2: Runtime Host API
+### Phase 2: Runtime Broker API
 - [ ] HTTP server setup
 - [ ] Agent lifecycle endpoints
 - [ ] WebSocket PTY endpoint
@@ -1005,6 +1005,6 @@ server:
 ## 17. References
 
 - **Hub API Specification:** `hub-api.md`
-- **Runtime Host API Specification:** `runtime-host-api.md`
+- **Runtime Broker API Specification:** `runtime-broker-api.md`
 - **Hosted Architecture:** `hosted-architecture.md`
 - **koanf Documentation:** https://github.com/knadh/koanf

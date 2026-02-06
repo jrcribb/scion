@@ -28,10 +28,10 @@ var hubEnvCmd = &cobra.Command{
 Environment variables can be scoped to:
   - User (default): Available to all your agents
   - Grove: Available to agents in a specific grove
-  - Host: Available to agents running on a specific host
+  - Broker: Available to agents running on a specific broker
 
 Variables are resolved hierarchically when an agent starts:
-  user -> grove -> host -> agent config
+  user -> grove -> broker -> agent config
 
 Examples:
   # Set a user-scoped variable (two formats)
@@ -60,7 +60,7 @@ var hubEnvSetCmd = &cobra.Command{
 	Short: "Set an environment variable",
 	Long: `Set an environment variable in the Hub.
 
-By default, variables are scoped to the current user. Use --grove or --host
+By default, variables are scoped to the current user. Use --grove or --broker
 to set variables at different scopes.
 
 The value can be provided as a single argument in KEY=VALUE format, or as
@@ -102,7 +102,7 @@ var hubEnvClearCmd = &cobra.Command{
 Examples:
   scion hub env clear API_URL
   scion hub env clear --grove API_URL
-  scion hub env clear --host API_URL`,
+  scion hub env clear --broker API_URL`,
 	Args: cobra.ExactArgs(1),
 	RunE: runEnvClear,
 }
@@ -116,7 +116,7 @@ func init() {
 	// Add scope flags to all subcommands
 	for _, cmd := range []*cobra.Command{hubEnvSetCmd, hubEnvGetCmd, hubEnvClearCmd} {
 		cmd.Flags().StringVar(&envGroveScope, "grove", "", "Grove scope (use flag without value to infer from current directory, or provide grove ID)")
-		cmd.Flags().StringVar(&envBrokerScope, "broker", "", "Host scope (use flag without value to use current host, or provide host ID)")
+		cmd.Flags().StringVar(&envBrokerScope, "broker", "", "Broker scope (use flag without value to use current broker, or provide broker ID)")
 	}
 
 	hubEnvGetCmd.Flags().BoolVar(&envOutputJSON, "json", false, "Output in JSON format")
@@ -125,10 +125,10 @@ func init() {
 // resolveEnvScope determines the scope and scopeID based on flags
 func resolveEnvScope(cmd *cobra.Command, settings *config.Settings) (scope, scopeID string, err error) {
 	groveSet := cmd.Flags().Changed("grove")
-	brokerSet := cmd.Flags().Changed("host")
+	brokerSet := cmd.Flags().Changed("broker")
 
 	if groveSet && brokerSet {
-		return "", "", fmt.Errorf("cannot specify both --grove and --host")
+		return "", "", fmt.Errorf("cannot specify both --grove and --broker")
 	}
 
 	if groveSet {
@@ -155,7 +155,7 @@ func resolveEnvScope(cmd *cobra.Command, settings *config.Settings) (scope, scop
 			if settings.Hub != nil && settings.Hub.BrokerID != "" {
 				scopeID = settings.Hub.BrokerID
 			} else {
-				return "", "", fmt.Errorf("cannot infer host ID: not registered with Hub. Use 'scion hub register' first or provide explicit host ID")
+				return "", "", fmt.Errorf("cannot infer broker ID: not registered with Hub. Use 'scion hub register' first or provide explicit broker ID")
 			}
 		}
 		return scope, scopeID, nil

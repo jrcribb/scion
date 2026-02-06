@@ -138,7 +138,7 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 		return nil, nil
 	}
 
-	// Clean up stale host credentials from grove settings.
+	// Clean up stale broker credentials from grove settings.
 	// These should only exist in global settings, not grove-specific settings.
 	// Earlier versions incorrectly wrote them to grove settings.
 	if !isGlobal {
@@ -400,11 +400,11 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult, au
 	debugf("ExecuteSync starting: groveID=%s, brokerID=%s", hubCtx.GroveID, hubCtx.BrokerID)
 
 	// Register local agents on Hub
-	// Note: We don't specify a runtime host ID - the hub will resolve it based on
+	// Note: We don't specify a runtime broker ID - the hub will resolve it based on
 	// available grove contributors (single contributor = auto-select, multiple = error)
 	for _, name := range result.ToRegister {
 		fmt.Printf("Registering agent '%s' on Hub...\n", name)
-		debugf("Creating agent: name=%s, groveID=%s (hub will resolve runtime host)", name, hubCtx.GroveID)
+		debugf("Creating agent: name=%s, groveID=%s (hub will resolve runtime broker)", name, hubCtx.GroveID)
 		req := &hubclient.CreateAgentRequest{
 			Name:    name,
 			GroveID: hubCtx.GroveID,
@@ -418,12 +418,12 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult, au
 			}
 
 			var apiErr *apiclient.APIError
-			if !errors.As(err, &apiErr) || apiErr.Code != "no_runtime_host" {
+			if !errors.As(err, &apiErr) || apiErr.Code != "no_runtime_broker" {
 				debugf("Failed to register agent '%s': %v", name, err)
 				return fmt.Errorf("failed to register agent '%s': %w", name, err)
 			}
 
-			// Handle ambiguous host
+			// Handle ambiguous broker
 			availableHosts, ok := apiErr.Details["availableHosts"].([]interface{})
 			if !ok || len(availableHosts) == 0 {
 				return fmt.Errorf("failed to register agent '%s': %w", name, err)
@@ -431,10 +431,10 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult, au
 
 			// Only prompt if interactive and not auto-confirm
 			if autoConfirm || !util.IsTerminal() {
-				return fmt.Errorf("failed to register agent '%s': multiple runtime hosts available, specify a host via Hub config or --host flag (original error: %w)", name, err)
+				return fmt.Errorf("failed to register agent '%s': multiple runtime brokers available, specify a host via Hub config or --host flag (original error: %w)", name, err)
 			}
 
-			fmt.Printf("\nMultiple runtime hosts available for grove:\n")
+			fmt.Printf("\nMultiple runtime brokers available for grove:\n")
 			for i, h := range availableHosts {
 				hostMap, _ := h.(map[string]interface{})
 				name, _ := hostMap["name"].(string)
@@ -444,7 +444,7 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult, au
 			fmt.Println()
 
 			reader := bufio.NewReader(os.Stdin)
-			fmt.Print("Select a host for agent registration (or 'c' to cancel): ")
+			fmt.Print("Select a broker for agent registration (or 'c' to cancel): ")
 			input, err := reader.ReadString('\n')
 			if err != nil {
 				return fmt.Errorf("failed to read input: %w", err)
@@ -463,7 +463,7 @@ func ExecuteSync(ctx context.Context, hubCtx *HubContext, result *SyncResult, au
 
 			selectedHost, _ := availableHosts[choice-1].(map[string]interface{})
 			req.RuntimeBrokerID, _ = selectedHost["id"].(string)
-			// Loop and retry with selected host
+			// Loop and retry with selected broker
 		}
 	}
 
@@ -583,7 +583,7 @@ func registerGrove(ctx context.Context, hubCtx *HubContext, groveName string, is
 		GitRemote: util.NormalizeGitRemote(gitRemote),
 		Path:      hubCtx.GrovePath,
 		Mode:      "connected",
-		Host: &hubclient.HostInfo{
+		Broker: &hubclient.BrokerInfo{
 			ID:   hubCtx.BrokerID,
 			Name: brokerName,
 		},
@@ -595,7 +595,7 @@ func registerGrove(ctx context.Context, hubCtx *HubContext, groveName string, is
 	}
 
 	// Save the host token and ID to GLOBAL settings only.
-	// These are host-level credentials, not grove-specific.
+	// These are broker-level credentials, not grove-specific.
 	globalDir, globalErr := config.GetGlobalDir()
 	if globalErr != nil {
 		fmt.Printf("Warning: failed to get global directory: %v\n", globalErr)
@@ -605,9 +605,9 @@ func registerGrove(ctx context.Context, hubCtx *HubContext, groveName string, is
 				fmt.Printf("Warning: failed to save host token: %v\n", err)
 			}
 		}
-		if resp.Host != nil && resp.Host.ID != "" {
-			if err := config.UpdateSetting(globalDir, "hub.brokerId", resp.Host.ID, true); err != nil {
-				fmt.Printf("Warning: failed to save host ID: %v\n", err)
+		if resp.Broker != nil && resp.Broker.ID != "" {
+			if err := config.UpdateSetting(globalDir, "hub.brokerId", resp.Broker.ID, true); err != nil {
+				fmt.Printf("Warning: failed to save broker ID: %v\n", err)
 			}
 		}
 	}
@@ -625,8 +625,8 @@ func registerGrove(ctx context.Context, hubCtx *HubContext, groveName string, is
 			}
 		}
 	}
-	if resp.Host != nil {
-		fmt.Printf("Host registered: %s (ID: %s)\n", resp.Host.Name, resp.Host.ID)
+	if resp.Broker != nil {
+		fmt.Printf("Host registered: %s (ID: %s)\n", resp.Broker.Name, resp.Broker.ID)
 	}
 
 	return nil

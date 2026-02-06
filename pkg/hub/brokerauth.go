@@ -134,8 +134,8 @@ type CreateHostRegistrationResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// HostJoinRequest is the request body for POST /api/v1/brokers/join.
-type HostJoinRequest struct {
+// BrokerJoinRequest is the request body for POST /api/v1/brokers/join.
+type BrokerJoinRequest struct {
 	BrokerID string   `json:"brokerId"`
 	JoinToken    string   `json:"joinToken"`
 	Hostname     string   `json:"hostname"`
@@ -143,8 +143,8 @@ type HostJoinRequest struct {
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 
-// HostJoinResponse is the response for POST /api/v1/brokers/join.
-type HostJoinResponse struct {
+// BrokerJoinResponse is the response for POST /api/v1/brokers/join.
+type BrokerJoinResponse struct {
 	SecretKey   string `json:"secretKey"` // Base64-encoded 256-bit key
 	HubEndpoint string `json:"hubEndpoint"`
 	BrokerID string `json:"brokerId"`
@@ -163,7 +163,7 @@ func (s *BrokerAuthService) CreateHostRegistration(ctx context.Context, req Crea
 	// Generate host ID
 	brokerID := uuid.New().String()
 
-	// Create the runtime host record
+	// Create the runtime broker record
 	broker := &store.RuntimeBroker{
 		ID:          brokerID,
 		Name:        req.Name,
@@ -176,7 +176,7 @@ func (s *BrokerAuthService) CreateHostRegistration(ctx context.Context, req Crea
 	}
 
 	if err := s.store.CreateRuntimeBroker(ctx, broker); err != nil {
-		return nil, fmt.Errorf("failed to create runtime host: %w", err)
+		return nil, fmt.Errorf("failed to create runtime broker: %w", err)
 	}
 
 	// Generate join token
@@ -216,7 +216,7 @@ func (s *BrokerAuthService) CreateHostRegistration(ctx context.Context, req Crea
 
 // CompleteHostJoin completes host registration with join token exchange.
 // Returns the shared secret for HMAC authentication.
-func (s *BrokerAuthService) CompleteHostJoin(ctx context.Context, req HostJoinRequest, hubEndpoint string) (*HostJoinResponse, error) {
+func (s *BrokerAuthService) CompleteHostJoin(ctx context.Context, req BrokerJoinRequest, hubEndpoint string) (*BrokerJoinResponse, error) {
 	if req.BrokerID == "" {
 		return nil, errors.New("hostId is required")
 	}
@@ -254,7 +254,7 @@ func (s *BrokerAuthService) CompleteHostJoin(ctx context.Context, req HostJoinRe
 		return nil, fmt.Errorf("failed to generate secret key: %w", err)
 	}
 
-	// Store the host secret
+	// Store the broker secret
 	hostSecret := &store.BrokerSecret{
 		BrokerID:    req.BrokerID,
 		SecretKey: secretKey,
@@ -264,13 +264,13 @@ func (s *BrokerAuthService) CompleteHostJoin(ctx context.Context, req HostJoinRe
 	}
 
 	if err := s.store.CreateBrokerSecret(ctx, hostSecret); err != nil {
-		return nil, fmt.Errorf("failed to store host secret: %w", err)
+		return nil, fmt.Errorf("failed to store broker secret: %w", err)
 	}
 
-	// Update the runtime host with connection info
+	// Update the runtime broker with connection info
 	broker, err := s.store.GetRuntimeBroker(ctx, req.BrokerID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get runtime host: %w", err)
+		return nil, fmt.Errorf("failed to get runtime broker: %w", err)
 	}
 
 	broker.Version = req.Version
@@ -280,13 +280,13 @@ func (s *BrokerAuthService) CompleteHostJoin(ctx context.Context, req HostJoinRe
 	broker.Updated = time.Now()
 
 	if err := s.store.UpdateRuntimeBroker(ctx, broker); err != nil {
-		return nil, fmt.Errorf("failed to update runtime host: %w", err)
+		return nil, fmt.Errorf("failed to update runtime broker: %w", err)
 	}
 
 	// Delete the used join token
 	_ = s.store.DeleteJoinToken(ctx, joinToken.BrokerID)
 
-	return &HostJoinResponse{
+	return &BrokerJoinResponse{
 		SecretKey:   base64.StdEncoding.EncodeToString(secretKey),
 		HubEndpoint: hubEndpoint,
 		BrokerID:      req.BrokerID,
@@ -314,7 +314,7 @@ func (s *BrokerAuthService) GenerateAndStoreSecret(ctx context.Context, brokerID
 		return "", fmt.Errorf("failed to generate secret key: %w", err)
 	}
 
-	// Store the host secret
+	// Store the broker secret
 	hostSecret := &store.BrokerSecret{
 		BrokerID:    brokerID,
 		SecretKey: secretKey,
@@ -324,7 +324,7 @@ func (s *BrokerAuthService) GenerateAndStoreSecret(ctx context.Context, brokerID
 	}
 
 	if err := s.store.CreateBrokerSecret(ctx, hostSecret); err != nil {
-		return "", fmt.Errorf("failed to store host secret: %w", err)
+		return "", fmt.Errorf("failed to store broker secret: %w", err)
 	}
 
 	return base64.StdEncoding.EncodeToString(secretKey), nil
@@ -343,7 +343,7 @@ const (
 	HeaderSignedHeaders = "X-Scion-Signed-Headers"
 )
 
-// ValidateHostSignature validates an HMAC-signed request from a Runtime Host.
+// ValidateHostSignature validates an HMAC-signed request from a Runtime Broker.
 func (s *BrokerAuthService) ValidateHostSignature(ctx context.Context, r *http.Request) (BrokerIdentity, error) {
 	// Extract required headers
 	brokerID := r.Header.Get(HeaderBrokerID)
@@ -390,17 +390,17 @@ func (s *BrokerAuthService) ValidateHostSignature(ctx context.Context, r *http.R
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, fmt.Errorf("unknown host: %s", brokerID)
 		}
-		return nil, fmt.Errorf("failed to get host secret: %w", err)
+		return nil, fmt.Errorf("failed to get broker secret: %w", err)
 	}
 
 	// Check if secret is active
 	if hostSecret.Status != store.BrokerSecretStatusActive {
-		return nil, fmt.Errorf("host secret is %s", hostSecret.Status)
+		return nil, fmt.Errorf("broker secret is %s", hostSecret.Status)
 	}
 
 	// Check expiry
 	if !hostSecret.ExpiresAt.IsZero() && time.Now().After(hostSecret.ExpiresAt) {
-		return nil, errors.New("host secret has expired")
+		return nil, errors.New("broker secret has expired")
 	}
 
 	// Build canonical string and verify signature
@@ -470,7 +470,7 @@ func (s *BrokerAuthService) buildCanonicalString(r *http.Request, timestamp, non
 }
 
 // SignRequest signs an outgoing HTTP request with HMAC.
-// Used by Runtime Hosts when calling the Hub API.
+// Used by Runtime Brokers when calling the Hub API.
 func (s *BrokerAuthService) SignRequest(r *http.Request, brokerID string, secret []byte) error {
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 
@@ -569,7 +569,7 @@ func (s *BrokerAuthService) ValidateHostSignatureWithRotation(ctx context.Contex
 	// Get all active secrets for this host
 	secrets, err := s.store.GetActiveSecrets(ctx, brokerID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get host secrets: %w", err)
+		return nil, fmt.Errorf("failed to get broker secrets: %w", err)
 	}
 
 	if len(secrets) == 0 {
@@ -716,5 +716,5 @@ func BrokerAuthMiddleware(svc *BrokerAuthService) func(http.Handler) http.Handle
 
 // writeHostAuthError writes a host authentication error response.
 func writeHostAuthError(w http.ResponseWriter, message string) {
-	writeError(w, http.StatusUnauthorized, ErrCodeHostAuthFailed, message, nil)
+	writeError(w, http.StatusUnauthorized, ErrCodeBrokerAuthFailed, message, nil)
 }

@@ -24,7 +24,7 @@ func TestNew(t *testing.T) {
 		t.Error("expected non-nil groves service")
 	}
 	if client.RuntimeBrokers() == nil {
-		t.Error("expected non-nil runtime hosts service")
+		t.Error("expected non-nil runtime brokers service")
 	}
 	if client.Templates() == nil {
 		t.Error("expected non-nil templates service")
@@ -248,7 +248,7 @@ func TestGrovesRegister(t *testing.T) {
 			},
 			Host: &RuntimeBroker{
 				ID:   "host-uuid",
-				Name: req.Host.Name,
+				Name: req.Broker.Name,
 			},
 			Created:   true,
 			BrokerToken: "secret-host-token",
@@ -262,7 +262,7 @@ func TestGrovesRegister(t *testing.T) {
 		GitRemote: "git@github.com:org/repo.git",
 		Path:      "/path/to/.scion",
 		Mode:      "connected",
-		Host: &HostInfo{
+		Broker: &BrokerInfo{
 			Name:    "Dev Laptop",
 			Version: "1.0.0",
 		},

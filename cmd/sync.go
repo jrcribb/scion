@@ -146,7 +146,7 @@ func syncFromViaHub(hubCtx *HubContext, agentID, agentName, localPath string) er
 		}
 	}
 
-	// Initiate sync-from - this triggers Runtime Host to upload to GCS
+	// Initiate sync-from - this triggers Runtime Broker to upload to GCS
 	resp, err := hubCtx.Client.Workspace().SyncFrom(ctx, agentID, opts)
 	if err != nil {
 		return wrapHubError(fmt.Errorf("failed to initiate sync: %w", err))

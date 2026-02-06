@@ -1,6 +1,6 @@
-# Runtime Host API Testing Walkthrough
+# Runtime Broker API Testing Walkthrough
 
-This guide provides step-by-step instructions for testing the Runtime Host API alongside the Hub API on a Mac with apple-container runtime.
+This guide provides step-by-step instructions for testing the Runtime Broker API alongside the Hub API on a Mac with apple-container runtime.
 
 ## Prerequisites
 
@@ -18,11 +18,11 @@ This guide provides step-by-step instructions for testing the Runtime Host API a
 go build -buildvcs=false -o scion ./cmd/scion
 ```
 
-### Start Both Hub and Runtime Host APIs
+### Start Both Hub and Runtime Broker APIs
 
 ```bash
 # Start both servers together
-./scion server start --enable-hub --enable-runtime-host
+./scion server start --enable-hub --enable-runtime-broker
 ```
 
 You should see output like:
@@ -30,23 +30,23 @@ You should see output like:
 2025/01/25 10:00:00 Starting Hub API server on 0.0.0.0:9810
 2025/01/25 10:00:00 Database: sqlite (/Users/you/.scion/hub.db)
 2025/01/25 10:00:00 Hub API server starting on 0.0.0.0:9810
-2025/01/25 10:00:00 Starting Runtime Host API server on 0.0.0.0:9800 (mode: connected)
-2025/01/25 10:00:00 Runtime Host API server starting on 0.0.0.0:9800
-2025/01/25 10:00:00 Agent dispatcher configured for co-located runtime host
-2025/01/25 10:00:00 Registered global grove with runtime host your-hostname
+2025/01/25 10:00:00 Starting Runtime Broker API server on 0.0.0.0:9800 (mode: connected)
+2025/01/25 10:00:00 Runtime Broker API server starting on 0.0.0.0:9800
+2025/01/25 10:00:00 Agent dispatcher configured for co-located runtime broker
+2025/01/25 10:00:00 Registered global grove with runtime broker your-hostname
 ```
 
 When both servers start together, they automatically:
 1. Create a "global" grove as the default grove for the system
-2. Register the runtime host as a contributor to the global grove
+2. Register the runtime broker as a contributor to the global grove
 3. Set up an agent dispatcher for zero-friction agent handoff
 
-### Alternative: Start Just Runtime Host
+### Alternative: Start Just Runtime Broker
 
-If you only want to test the Runtime Host API without the Hub:
+If you only want to test the Runtime Broker API without the Hub:
 
 ```bash
-./scion server start --enable-runtime-host
+./scion server start --enable-runtime-broker
 ```
 
 ### Custom Configuration
@@ -54,10 +54,10 @@ If you only want to test the Runtime Host API without the Hub:
 ```bash
 # Custom ports
 ./scion server start --enable-hub --port 8810 \
-  --enable-runtime-host --runtime-host-port 8800
+  --enable-runtime-broker --runtime-broker-port 8800
 ```
 
-## 2. Test Runtime Host Health Endpoints
+## 2. Test Runtime Broker Health Endpoints
 
 ### Health Check
 
@@ -120,7 +120,7 @@ Expected response:
 }
 ```
 
-## 3. Agent Management via Runtime Host API
+## 3. Agent Management via Runtime Broker API
 
 ### List Agents
 
@@ -138,9 +138,9 @@ Expected response (empty initially):
 
 ### Create an Agent
 
-Agents can be created directly via the Runtime Host API, or through the Hub API with grove-scoped endpoints.
+Agents can be created directly via the Runtime Broker API, or through the Hub API with grove-scoped endpoints.
 
-**Via Runtime Host API (direct):**
+**Via Runtime Broker API (direct):**
 
 ```bash
 curl -s -X POST http://localhost:9800/api/v1/agents \
@@ -154,15 +154,15 @@ curl -s -X POST http://localhost:9800/api/v1/agents \
   }' | jq
 ```
 
-**Via Hub API (requires grove and runtime host):**
+**Via Hub API (requires grove and runtime broker):**
 
-When both Hub and Runtime Host servers are co-located, agents can be created via the Hub API and will automatically be dispatched to the runtime host.
+When both Hub and Runtime Broker servers are co-located, agents can be created via the Hub API and will automatically be dispatched to the runtime broker.
 
 ```bash
 # Get the global grove ID
 GROVE_ID=$(curl -s http://localhost:9810/api/v1/groves | jq -r '.groves[] | select(.slug == "global") | .id')
 
-# Create an agent via Hub API (uses global grove's default runtime host)
+# Create an agent via Hub API (uses global grove's default runtime broker)
 curl -s -X POST http://localhost:9810/api/v1/agents \
   -H "Content-Type: application/json" \
   -d "{
@@ -174,10 +174,10 @@ curl -s -X POST http://localhost:9810/api/v1/agents \
 ```
 
 When creating agents via the Hub API, you must either:
-1. Specify a `runtimeHostId` explicitly, OR
-2. Use a grove that has a default runtime host configured (set automatically when co-located servers start)
+1. Specify a `runtimeBrokerId` explicitly, OR
+2. Use a grove that has a default runtime broker configured (set automatically when co-located servers start)
 
-If neither is available, you'll receive a `no_runtime_host` error with a list of available alternatives.
+If neither is available, you'll receive a `no_runtime_broker` error with a list of available alternatives.
 
 Expected response:
 ```json
@@ -275,19 +275,19 @@ Returns plain text logs.
 curl -s -X POST http://localhost:9800/api/v1/agents/test-agent/stats | jq
 ```
 
-## 5. Combined Hub + Runtime Host Workflow
+## 5. Combined Hub + Runtime Broker Workflow
 
-This workflow demonstrates how the Hub and Runtime Host APIs work together with automatic handoff.
+This workflow demonstrates how the Hub and Runtime Broker APIs work together with automatic handoff.
 
 ### Step 1: Check Both Servers and Global Grove
 
-When both servers start together, a "global" grove is automatically created and the runtime host is registered.
+When both servers start together, a "global" grove is automatically created and the runtime broker is registered.
 
 ```bash
 echo "=== Hub Health ==="
 curl -s http://localhost:9810/healthz | jq
 
-echo -e "\n=== Runtime Host Health ==="
+echo -e "\n=== Runtime Broker Health ==="
 curl -s http://localhost:9800/healthz | jq
 
 echo -e "\n=== Global Grove ==="
@@ -296,13 +296,13 @@ curl -s http://localhost:9810/api/v1/groves | jq '.groves[] | select(.slug == "g
 
 ### Step 2: Create Agent via Hub (Automatic Handoff)
 
-When you create an agent via the Hub API while a co-located runtime host is running, the agent is automatically dispatched to the runtime host and started.
+When you create an agent via the Hub API while a co-located runtime broker is running, the agent is automatically dispatched to the runtime broker and started.
 
-**Runtime Host Resolution:**
+**Runtime Broker Resolution:**
 
-Agents created via the Hub API require a runtime host. The Hub resolves the runtime host in this order:
-1. Use the explicitly specified `runtimeHostId` if provided
-2. Fall back to the grove's `defaultRuntimeHostId` (set when the first host registers)
+Agents created via the Hub API require a runtime broker. The Hub resolves the runtime broker in this order:
+1. Use the explicitly specified `runtimeBrokerId` if provided
+2. Fall back to the grove's `defaultRuntimeBrokerId` (set when the first host registers)
 3. Return an error with available alternatives if neither is available
 
 
@@ -310,7 +310,7 @@ Agents created via the Hub API require a runtime host. The Hub resolves the runt
 # Get the global grove ID
 GROVE_ID=$(curl -s http://localhost:9810/api/v1/groves | jq -r '.groves[] | select(.slug == "global") | .id')
 
-# Create an agent in the global grove (uses default runtime host)
+# Create an agent in the global grove (uses default runtime broker)
 curl -s -X POST http://localhost:9810/api/v1/agents \
   -H "Content-Type: application/json" \
   -d "{
@@ -321,25 +321,25 @@ curl -s -X POST http://localhost:9810/api/v1/agents \
   }" | jq
 ```
 
-**Specifying a runtime host explicitly:**
+**Specifying a runtime broker explicitly:**
 
 ```bash
-# Get available runtime hosts for the grove
-HOST_ID=$(curl -s "http://localhost:9810/api/v1/runtime-hosts?groveId=$GROVE_ID" | jq -r '.hosts[0].id')
+# Get available runtime brokers for the grove
+HOST_ID=$(curl -s "http://localhost:9810/api/v1/runtime-brokers?groveId=$GROVE_ID" | jq -r '.hosts[0].id')
 
-# Create an agent with explicit runtime host
+# Create an agent with explicit runtime broker
 curl -s -X POST http://localhost:9810/api/v1/agents \
   -H "Content-Type: application/json" \
   -d "{
     \"name\": \"feature-agent-2\",
     \"groveId\": \"$GROVE_ID\",
-    \"runtimeHostId\": \"$HOST_ID\",
+    \"runtimeBrokerId\": \"$HOST_ID\",
     \"template\": \"claude\",
     \"task\": \"Hello, please describe the project structure\"
   }" | jq
 ```
 
-The agent will be created and automatically started on the co-located runtime host. The response includes the agent with status "provisioning" or "running" and the assigned `runtimeHostId`.
+The agent will be created and automatically started on the co-located runtime broker. The response includes the agent with status "provisioning" or "running" and the assigned `runtimeBrokerId`.
 
 ### Step 2b: Create Agent via Grove-Scoped Endpoint (Alternative)
 
@@ -356,9 +356,9 @@ curl -s -X POST "http://localhost:9810/api/v1/groves/${GROVE_ID}__global/agents"
   }' | jq
 ```
 
-### Step 3: List Agents on Runtime Host
+### Step 3: List Agents on Runtime Broker
 
-With automatic handoff, agents created via the Hub now appear in the runtime host's agent list:
+With automatic handoff, agents created via the Hub now appear in the runtime broker's agent list:
 
 ```bash
 curl -s http://localhost:9800/api/v1/agents | jq
@@ -472,7 +472,7 @@ echo "Project Grove ID: $PROJECT_GROVE_ID"
 
 ```bash
 # The contributor record should now include the local path
-curl -s "http://localhost:9810/api/v1/runtime-hosts?groveId=$PROJECT_GROVE_ID" | jq
+curl -s "http://localhost:9810/api/v1/runtime-brokers?groveId=$PROJECT_GROVE_ID" | jq
 ```
 
 Expected response (note the `localPath` field included for each host):
@@ -509,7 +509,7 @@ Expected response (note the `localPath` field included for each host):
 }
 ```
 
-The `localPath` field is included when querying runtime hosts filtered by `groveId`, providing the grove-specific filesystem path for each host contributor.
+The `localPath` field is included when querying runtime brokers filtered by `groveId`, providing the grove-specific filesystem path for each host contributor.
 
 ### Step 4: Create an Agent in the Project Grove
 
@@ -525,7 +525,7 @@ curl -s -X POST "http://localhost:9810/api/v1/groves/${PROJECT_GROVE_ID}/agents"
 
 ### Step 5: Verify Agent is Using the Project Path
 
-The agent should now be running with the project's workspace mounted. Check the agent on the runtime host:
+The agent should now be running with the project's workspace mounted. Check the agent on the runtime broker:
 
 ```bash
 curl -s http://localhost:9800/api/v1/agents/project-agent | jq
@@ -551,9 +551,9 @@ curl -s -X DELETE "http://localhost:9800/api/v1/agents/project-agent?deleteFiles
 
 ## 6. Error Handling
 
-### No Runtime Host Available
+### No Runtime Broker Available
 
-When creating an agent via the Hub API without a runtime host configured:
+When creating an agent via the Hub API without a runtime broker configured:
 
 ```bash
 # Try to create agent for a grove with no registered hosts
@@ -566,8 +566,8 @@ Expected response (422):
 ```json
 {
   "error": {
-    "code": "no_runtime_host",
-    "message": "No runtime hosts available for this grove; register a runtime host first",
+    "code": "no_runtime_broker",
+    "message": "No runtime brokers available for this grove; register a runtime broker first",
     "details": {
       "availableHosts": []
     }
@@ -575,22 +575,22 @@ Expected response (422):
 }
 ```
 
-### Runtime Host Unavailable
+### Runtime Broker Unavailable
 
-When specifying a runtime host that is offline or not a contributor:
+When specifying a runtime broker that is offline or not a contributor:
 
 ```bash
 curl -s -X POST http://localhost:9810/api/v1/agents \
   -H "Content-Type: application/json" \
-  -d '{"name": "test", "groveId": "grove123", "runtimeHostId": "offline-host"}' | jq
+  -d '{"name": "test", "groveId": "grove123", "runtimeBrokerId": "offline-host"}' | jq
 ```
 
 Expected response (503):
 ```json
 {
   "error": {
-    "code": "runtime_host_unavailable",
-    "message": "Specified runtime host is unavailable",
+    "code": "runtime_broker_unavailable",
+    "message": "Specified runtime broker is unavailable",
     "details": {
       "requestedHostId": "offline-host",
       "availableHosts": [
@@ -655,7 +655,7 @@ Expected response (400):
 
 ## 7. Full Workflow Script
 
-Save this as `test-runtime-host.sh`:
+Save this as `test-runtime-broker.sh`:
 
 ```bash
 #!/bin/bash
@@ -667,10 +667,10 @@ HOST_URL="http://localhost:9800"
 echo "=== 1. Health Checks ==="
 echo "Hub:"
 curl -s $HUB_URL/healthz | jq '.status'
-echo "Runtime Host:"
+echo "Runtime Broker:"
 curl -s $HOST_URL/healthz | jq '{status, mode, checks}'
 
-echo -e "\n=== 2. Runtime Host Info ==="
+echo -e "\n=== 2. Runtime Broker Info ==="
 curl -s $HOST_URL/api/v1/info | jq '{type, mode, capabilities}'
 
 echo -e "\n=== 3. Register Grove with Host ==="
@@ -710,8 +710,8 @@ echo "Agent ID: $AGENT_ID"
 echo -e "\n=== 6. List Agents in Hub ==="
 curl -s "$HUB_URL/api/v1/agents?groveId=$GROVE_ID" | jq '.agents[] | {name, status}'
 
-echo -e "\n=== 7. List Runtime Hosts ==="
-curl -s $HUB_URL/api/v1/runtime-hosts | jq '.hosts[] | {name, type, status}'
+echo -e "\n=== 7. List Runtime Brokers ==="
+curl -s $HUB_URL/api/v1/runtime-brokers | jq '.hosts[] | {name, type, status}'
 
 echo -e "\n=== 8. Final Health Stats ==="
 curl -s $HUB_URL/healthz | jq '.stats'
@@ -721,8 +721,8 @@ echo -e "\n=== Done! ==="
 
 Run it:
 ```bash
-chmod +x test-runtime-host.sh
-./test-runtime-host.sh
+chmod +x test-runtime-broker.sh
+./test-runtime-broker.sh
 ```
 
 ## 8. Cleanup
@@ -759,7 +759,7 @@ container rm <container-name>
 lsof -i :9800
 
 # Use different ports
-./scion server start --enable-runtime-host --runtime-host-port 9801
+./scion server start --enable-runtime-broker --runtime-broker-port 9801
 ```
 
 ### Container Runtime Not Found
@@ -776,11 +776,11 @@ container version
 
 ### No Agents Listed
 
-The Runtime Host API lists agents that are:
+The Runtime Broker API lists agents that are:
 1. Actually running as containers with `scion.agent=true` label
 2. Have agent directories in known grove paths
 
-When both Hub and Runtime Host are running together (co-located), agents created via the Hub are automatically dispatched to the Runtime Host and will appear in both agent lists.
+When both Hub and Runtime Broker are running together (co-located), agents created via the Hub are automatically dispatched to the Runtime Broker and will appear in both agent lists.
 
 ### Permission Issues
 
@@ -792,7 +792,7 @@ chmod 755 ~/.scion
 
 ## API Reference Summary
 
-### Runtime Host API (Port 9800)
+### Runtime Broker API (Port 9800)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|

@@ -18,7 +18,7 @@ func TestAgentCreate_HostResolution(t *testing.T) {
 	srv, s := testServer(t)
 	ctx := context.Background()
 
-	// Create a runtime host
+	// Create a runtime broker
 	broker := &store.RuntimeBroker{
 		ID:     "host_id_123",
 		Name:   "My Laptop",

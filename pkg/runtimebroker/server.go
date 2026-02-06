@@ -1,5 +1,5 @@
-// Package runtimehost provides the Scion Runtime Host API server.
-// The Runtime Host API exposes agent lifecycle management over HTTP,
+// Package runtimehost provides the Scion Runtime Broker API server.
+// The Runtime Broker API exposes agent lifecycle management over HTTP,
 // allowing the Scion Hub to remotely manage agents on this compute node.
 package runtimebroker
 
@@ -25,7 +25,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/util/logging"
 )
 
-// ServerConfig holds configuration for the Runtime Host API server.
+// ServerConfig holds configuration for the Runtime Broker API server.
 type ServerConfig struct {
 	// Port is the HTTP port to listen on.
 	Port int
@@ -41,9 +41,9 @@ type ServerConfig struct {
 	// HubEndpoint is the Hub API endpoint for reporting (optional).
 	HubEndpoint string
 
-	// HostID is a unique identifier for this runtime host.
+	// HostID is a unique identifier for this runtime broker.
 	BrokerID string
-	// HostName is a human-readable name for this runtime host.
+	// HostName is a human-readable name for this runtime broker.
 	BrokerName string
 
 	// CORS settings
@@ -57,7 +57,7 @@ type ServerConfig struct {
 	Debug bool
 
 	// Hub integration settings
-	// HubEnabled indicates whether this Runtime Host should connect to a Hub
+	// HubEnabled indicates whether this Runtime Broker should connect to a Hub
 	// for template hydration and other centralized services.
 	HubEnabled bool
 	// HubToken is the authentication token for the Hub API.
@@ -72,7 +72,7 @@ type ServerConfig struct {
 	TemplateCacheMaxSize int64
 
 	// Host credentials settings
-	// BrokerCredentialsPath is the path to the host credentials file.
+	// BrokerCredentialsPath is the path to the broker credentials file.
 	// If set, HMAC authentication will be used instead of bearer tokens.
 	// Defaults to ~/.scion/broker-credentials.json if not specified.
 	BrokerCredentialsPath string
@@ -120,7 +120,7 @@ func DefaultServerConfig() ServerConfig {
 	}
 }
 
-// Server is the Runtime Host API HTTP server.
+// Server is the Runtime Broker API HTTP server.
 type Server struct {
 	config     ServerConfig
 	manager    agent.Manager
@@ -150,7 +150,7 @@ type Server struct {
 	controlChannel *ControlChannelClient
 }
 
-// New creates a new Runtime Host API server.
+// New creates a new Runtime Broker API server.
 func New(cfg ServerConfig, mgr agent.Manager, rt runtime.Runtime) *Server {
 	srv := &Server{
 		config:    cfg,
@@ -198,13 +198,13 @@ func (s *Server) initHubIntegration() error {
 	}
 	s.cache = cache
 
-	// Try to load host credentials for HMAC auth
+	// Try to load broker credentials for HMAC auth
 	var secretKey []byte
 	if err := s.loadBrokerCredentials(); err == nil && s.brokerCredentials != nil {
 		// Decode the secret key
 		secretKey, err = base64.StdEncoding.DecodeString(s.brokerCredentials.SecretKey)
 		if err != nil {
-			slog.Warn("Failed to decode host secret key", "error", err)
+			slog.Warn("Failed to decode broker secret key", "error", err)
 		}
 	}
 
@@ -239,7 +239,7 @@ func (s *Server) initHubIntegration() error {
 	// Initialize hydrator
 	s.hydrator = templatecache.NewHydrator(s.cache, s.hubClient)
 
-	// Set up host auth middleware if enabled and we have credentials
+	// Set up broker auth middleware if enabled and we have credentials
 	if s.config.BrokerAuthEnabled && len(secretKey) > 0 {
 		s.hostAuthMiddleware = NewBrokerAuthMiddleware(BrokerAuthConfig{
 			Enabled:              true,
@@ -263,7 +263,7 @@ func (s *Server) initHubIntegration() error {
 	return nil
 }
 
-// loadBrokerCredentials attempts to load host credentials from the configured path.
+// loadBrokerCredentials attempts to load broker credentials from the configured path.
 func (s *Server) loadBrokerCredentials() error {
 	credPath := s.config.BrokerCredentialsPath
 	if credPath == "" {
@@ -277,7 +277,7 @@ func (s *Server) loadBrokerCredentials() error {
 
 	creds, err := s.credentialsStore.Load()
 	if err != nil {
-		return fmt.Errorf("failed to load host credentials: %w", err)
+		return fmt.Errorf("failed to load broker credentials: %w", err)
 	}
 
 	s.brokerCredentials = creds
@@ -324,7 +324,7 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 
-	slog.Info("Runtime Host API server starting",
+	slog.Info("Runtime Broker API server starting",
 		"host", s.config.Host,
 		"port", s.config.Port,
 		"mode", s.config.Mode,
@@ -337,13 +337,13 @@ func (s *Server) Start(ctx context.Context) error {
 		)
 	}
 
-	// Check if we have valid host credentials for Hub communication
+	// Check if we have valid broker credentials for Hub communication
 	hasValidCredentials := s.brokerCredentials != nil && s.brokerCredentials.SecretKey != ""
 
 	// Start heartbeat service if enabled and we have valid credentials
 	if s.config.HeartbeatEnabled && s.hubClient != nil && s.config.BrokerID != "" {
 		if !hasValidCredentials {
-			slog.Warn("Skipping heartbeat: no valid host credentials (run 'scion hub register' first)")
+			slog.Warn("Skipping heartbeat: no valid broker credentials (run 'scion hub register' first)")
 		} else {
 			interval := s.config.HeartbeatInterval
 			if interval <= 0 {
@@ -365,7 +365,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Start control channel if enabled and we have valid credentials
 	if s.config.ControlChannelEnabled && s.config.HubEndpoint != "" && s.config.BrokerID != "" {
 		if !hasValidCredentials {
-			slog.Warn("Skipping control channel: no valid host credentials (run 'scion hub register' first)")
+			slog.Warn("Skipping control channel: no valid broker credentials (run 'scion hub register' first)")
 		} else {
 			secretKey, err := base64.StdEncoding.DecodeString(s.brokerCredentials.SecretKey)
 			if err != nil {
@@ -448,7 +448,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	slog.Info("Runtime Host API server shutting down...")
+	slog.Info("Runtime Broker API server shutting down...")
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -517,7 +517,7 @@ func (s *Server) checkAndReloadCredentials(ctx context.Context) error {
 	s.credentialsModTime = modTime
 	s.mu.Unlock()
 
-	// Check if host ID or secret key changed (requiring service restart)
+	// Check if broker ID or secret key changed (requiring service restart)
 	hostIDChanged := oldCredentials == nil || oldCredentials.BrokerID != creds.BrokerID
 	secretKeyChanged := oldCredentials == nil || oldCredentials.SecretKey != creds.SecretKey
 
@@ -649,7 +649,7 @@ func (s *Server) applyMiddleware(h http.Handler) http.Handler {
 	if s.config.CORSEnabled {
 		h = s.corsMiddleware(h)
 	}
-	// Apply host auth middleware if configured
+	// Apply broker auth middleware if configured
 	if s.hostAuthMiddleware != nil {
 		h = s.hostAuthMiddleware.Middleware(h)
 	}

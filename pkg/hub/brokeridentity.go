@@ -5,7 +5,7 @@ import (
 	"context"
 )
 
-// BrokerIdentity represents an authenticated Runtime Host.
+// BrokerIdentity represents an authenticated Runtime Broker.
 type BrokerIdentity interface {
 	Identity
 	BrokerID() string

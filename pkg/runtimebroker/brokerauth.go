@@ -1,4 +1,4 @@
-// Package runtimehost provides the Scion Runtime Host API server.
+// Package runtimehost provides the Scion Runtime Broker API server.
 package runtimebroker
 
 import (
@@ -122,7 +122,7 @@ func (m *BrokerAuthMiddleware) Middleware(next http.Handler) http.Handler {
 func (m *BrokerAuthMiddleware) writeError(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
-	fmt.Fprintf(w, `{"error":{"code":"host_auth_failed","message":%q}}`, message)
+	fmt.Fprintf(w, `{"error":{"code":"broker_auth_failed","message":%q}}`, message)
 }
 
 // UpdateSecretKey updates the secret key used for verification.

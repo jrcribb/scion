@@ -22,7 +22,7 @@ var (
 	hubRegisterMode   string
 	hubForceRegister  bool
 	hubOutputJSON     bool
-	hubDeregisterHost bool
+	hubDeregisterBroker bool
 )
 
 // hubCmd represents the hub command
@@ -32,7 +32,7 @@ var hubCmd = &cobra.Command{
 	Long: `Commands for interacting with a remote Scion Hub.
 
 The Hub provides centralized coordination for groves, agents, and templates
-across multiple runtime hosts.
+across multiple runtime brokers.
 
 Configure the Hub endpoint via:
   - SCION_HUB_ENDPOINT environment variable
@@ -48,19 +48,19 @@ var hubStatusCmd = &cobra.Command{
 	RunE:  runHubStatus,
 }
 
-// hubRegisterCmd registers this host with the Hub
+// hubRegisterCmd registers this broker with the Hub
 var hubRegisterCmd = &cobra.Command{
 	Use:   "register [grove-path]",
-	Short: "Register this host with the Hub",
-	Long: `Register this host as a runtime contributor for a grove.
+	Short: "Register this broker with the Hub",
+	Long: `Register this broker as a runtime contributor for a grove.
 
 If grove-path is not specified, uses the current project grove or global grove.
-The host is identified by its hostname to prevent duplicate registrations.
+The broker is identified by its hostname to prevent duplicate registrations.
 
 This command will:
 1. Create or update the grove in the Hub (matched by git remote or name)
-2. Register this host as a contributor to the grove (using hostname as identifier)
-3. Save the returned host token for future authentication
+2. Register this broker as a contributor to the grove (using hostname as identifier)
+3. Save the returned broker token for future authentication
 
 Examples:
   # Register the current project grove
@@ -71,17 +71,17 @@ Examples:
 	RunE: runHubRegister,
 }
 
-// hubDeregisterCmd removes this host from the Hub
+// hubDeregisterCmd removes this broker from the Hub
 var hubDeregisterCmd = &cobra.Command{
 	Use:   "deregister",
-	Short: "Remove this host from the Hub",
-	Long: `Remove this host from the Hub.
+	Short: "Remove this broker from the Hub",
+	Long: `Remove this broker from the Hub.
 
 This command will:
-1. Remove this host from all groves it contributes to
-2. Clear the stored host token
+1. Remove this broker from all groves it contributes to
+2. Clear the stored broker token
 
-Use --host-only to only remove the host record without affecting grove contributions.`,
+Use --broker-only to only remove the broker record without affecting grove contributions.`,
 	RunE: runHubDeregister,
 }
 
@@ -93,11 +93,11 @@ var hubGrovesCmd = &cobra.Command{
 	RunE:  runHubGroves,
 }
 
-// hubHostsCmd lists runtime hosts on the Hub
+// hubHostsCmd lists runtime brokers on the Hub
 var hubHostsCmd = &cobra.Command{
 	Use:   "hosts",
-	Short: "List runtime hosts on the Hub",
-	Long:  `List runtime hosts registered on the Hub.`,
+	Short: "List runtime brokers on the Hub",
+	Long:  `List runtime brokers registered on the Hub.`,
 	RunE:  runHubHosts,
 }
 
@@ -109,7 +109,7 @@ var hubEnableCmd = &cobra.Command{
 
 When enabled, agent operations (create, start, delete) will be routed through
 the Hub API instead of being performed locally. This allows centralized
-coordination of agents across multiple runtime hosts.
+coordination of agents across multiple runtime brokers.
 
 The Hub endpoint must be configured before enabling:
   - SCION_HUB_ENDPOINT environment variable
@@ -124,7 +124,7 @@ var hubDisableCmd = &cobra.Command{
 	Short: "Disable Hub integration",
 	Long: `Disable Hub integration for agent operations.
 
-When disabled, agent operations are performed locally on this host.
+When disabled, agent operations are performed locally on this broker.
 The Hub configuration is preserved and can be re-enabled later.`,
 	RunE: runHubDisable,
 }
@@ -144,7 +144,7 @@ func init() {
 	hubRegisterCmd.Flags().BoolVar(&hubForceRegister, "force", false, "Force re-registration even if already registered")
 
 	// Deregister flags
-	hubDeregisterCmd.Flags().BoolVar(&hubDeregisterHost, "host-only", false, "Only remove host record, not grove contributions")
+	hubDeregisterCmd.Flags().BoolVar(&hubDeregisterBroker, "broker-only", false, "Only remove broker record, not grove contributions")
 
 	// Common flags
 	hubStatusCmd.Flags().BoolVar(&hubOutputJSON, "json", false, "Output in JSON format")
@@ -222,7 +222,7 @@ func getHubClient(settings *config.Settings) (hubclient.Client, error) {
 	info := getAuthInfo(settings, endpoint)
 
 	// Add authentication - check in priority order
-	// Note: HostToken is intentionally NOT used here. HostTokens are for host-level
+	// Note: BrokerToken is intentionally NOT used here. BrokerTokens are for broker-level
 	// operations (registration, heartbeats) and are NOT user authentication tokens.
 	// For user operations (listing groves, agents, etc.), we use user tokens, API keys,
 	// OAuth credentials, or dev auth.
@@ -482,9 +482,9 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	// ==== TWO-PHASE HOST REGISTRATION ====
-	// Phase 1: Check for existing host credentials or create new host
-	// Phase 2: Complete host join to get HMAC secret
-	// Phase 3: Register grove with host ID
+	// Phase 1: Check for existing broker credentials or create new broker
+	// Phase 2: Complete broker join to get HMAC secret
+	// Phase 3: Register grove with broker ID
 
 	credStore := brokercredentials.NewStore("")
 	existingCreds, credErr := credStore.Load()
@@ -496,12 +496,12 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 	if credErr == nil && existingCreds != nil && existingCreds.BrokerID != "" && !hubForceRegister {
 		// Existing credentials found - verify they're still valid
 		brokerID = existingCreds.BrokerID
-		fmt.Printf("Using existing host credentials (hostId: %s)\n", brokerID)
+		fmt.Printf("Using existing broker credentials (hostId: %s)\n", brokerID)
 
-		// Verify the host still exists on the hub
+		// Verify the broker still exists on the hub
 		_, err := client.RuntimeBrokers().Get(ctx, brokerID)
 		if err != nil {
-			fmt.Printf("Warning: existing host not found on Hub, will re-register\n")
+			fmt.Printf("Warning: existing broker not found on Hub, will re-register\n")
 			brokerID = ""
 			needsJoin = true
 		}
@@ -509,11 +509,11 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 		needsJoin = true
 	}
 
-	// Phase 1 & 2: Create host and complete join if needed
+	// Phase 1 & 2: Create broker and complete join if needed
 	if needsJoin || brokerID == "" {
-		fmt.Printf("Registering host with Hub...\n")
+		fmt.Printf("Registering broker with Hub...\n")
 
-		// Phase 1: Create host registration
+		// Phase 1: Create broker registration
 		createReq := &hubclient.CreateBrokerRequest{
 			Name: brokerName,
 			Capabilities: []string{
@@ -524,12 +524,12 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 
 		createResp, err := client.RuntimeBrokers().Create(ctx, createReq)
 		if err != nil {
-			return fmt.Errorf("failed to create host registration: %w", err)
+			return fmt.Errorf("failed to create broker registration: %w", err)
 		}
 
-		fmt.Printf("Host created (ID: %s), completing join...\n", createResp.BrokerID)
+		fmt.Printf("Broker created (ID: %s), completing join...\n", createResp.BrokerID)
 
-		// Phase 2: Complete host join with join token
+		// Phase 2: Complete broker join with join token
 		joinReq := &hubclient.JoinBrokerRequest{
 			BrokerID:    createResp.BrokerID,
 			JoinToken: createResp.JoinToken,
@@ -543,26 +543,26 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 
 		joinResp, err := client.RuntimeBrokers().Join(ctx, joinReq)
 		if err != nil {
-			return fmt.Errorf("failed to complete host join: %w", err)
+			return fmt.Errorf("failed to complete broker join: %w", err)
 		}
 
 		brokerID = joinResp.BrokerID
 
 		// Save credentials
 		if err := credStore.SaveFromJoinResponse(brokerID, joinResp.SecretKey, endpoint); err != nil {
-			fmt.Printf("Warning: failed to save host credentials: %v\n", err)
+			fmt.Printf("Warning: failed to save broker credentials: %v\n", err)
 		} else {
 			fmt.Printf("Host credentials saved to %s\n", credStore.Path())
 		}
 	}
 
-	// Phase 3: Register grove with host ID link
+	// Phase 3: Register grove with broker ID link
 	req := &hubclient.RegisterGroveRequest{
 		ID:        groveID,
 		Name:      groveName,
 		GitRemote: util.NormalizeGitRemote(gitRemote),
 		Path:      resolvedPath,
-		BrokerID:    brokerID, // Link to the registered host
+		BrokerID:    brokerID, // Link to the registered broker
 		Mode:      hubRegisterMode,
 	}
 
@@ -571,7 +571,7 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("grove registration failed: %w", err)
 	}
 
-	// Save hub settings to GLOBAL settings since registration is a host-level operation.
+	// Save hub settings to GLOBAL settings since registration is a broker-level operation.
 	// The RuntimeBroker server reads from global settings to know which Hub to connect to.
 	globalDir, err := config.GetGlobalDir()
 	if err != nil {
@@ -584,9 +584,9 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Save the host ID to global settings
+		// Save the broker ID to global settings
 		if err := config.UpdateSetting(globalDir, "hub.brokerId", brokerID, true); err != nil {
-			fmt.Printf("Warning: failed to save host ID: %v\n", err)
+			fmt.Printf("Warning: failed to save broker ID: %v\n", err)
 		}
 	}
 
@@ -602,8 +602,8 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if resp.Host != nil {
-		fmt.Printf("Host registered: %s (ID: %s)\n", resp.Host.Name, resp.Host.ID)
+	if resp.Broker != nil {
+		fmt.Printf("Host registered: %s (ID: %s)\n", resp.Broker.Name, resp.Broker.ID)
 	} else {
 		fmt.Printf("Host linked: %s\n", brokerID)
 	}
@@ -624,7 +624,7 @@ func runHubDeregister(cmd *cobra.Command, args []string) error {
 	}
 
 	if settings.Hub == nil || settings.Hub.BrokerID == "" {
-		return fmt.Errorf("no host registration found")
+		return fmt.Errorf("no broker registration found")
 	}
 
 	client, err := getHubClient(settings)
@@ -642,7 +642,7 @@ func runHubDeregister(cmd *cobra.Command, args []string) error {
 	}
 
 	// Clear the stored credentials from GLOBAL settings
-	// These are host-level credentials, not grove-specific.
+	// These are broker-level credentials, not grove-specific.
 	globalDir, globalErr := config.GetGlobalDir()
 	if globalErr != nil {
 		fmt.Printf("Warning: failed to get global directory: %v\n", globalErr)
@@ -732,17 +732,17 @@ func runHubHosts(cmd *cobra.Command, args []string) error {
 	if hubOutputJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(resp.Hosts)
+		return enc.Encode(resp.Brokers)
 	}
 
-	if len(resp.Hosts) == 0 {
-		fmt.Println("No runtime hosts found")
+	if len(resp.Brokers) == 0 {
+		fmt.Println("No runtime brokers found")
 		return nil
 	}
 
 	fmt.Printf("%-36s  %-20s  %-10s  %s\n", "ID", "NAME", "STATUS", "MODE")
 	fmt.Printf("%-36s  %-20s  %-10s  %s\n", "------------------------------------", "--------------------", "----------", "----------")
-	for _, h := range resp.Hosts {
+	for _, h := range resp.Brokers {
 		fmt.Printf("%-36s  %-20s  %-10s  %s\n", h.ID, truncate(h.Name, 20), h.Status, h.Mode)
 	}
 

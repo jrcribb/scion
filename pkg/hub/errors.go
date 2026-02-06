@@ -37,13 +37,13 @@ const (
 	ErrCodeInternalError      = "internal_error"
 	ErrCodeRuntimeError       = "runtime_error"
 	ErrCodeUnavailable        = "unavailable"
-	ErrCodeNoRuntimeHost      = "no_runtime_host"
-	ErrCodeRuntimeHostUnavail = "runtime_host_unavailable"
+	ErrCodeNoRuntimeBroker      = "no_runtime_broker"
+	ErrCodeRuntimeBrokerUnavail = "runtime_broker_unavailable"
 
 	// Host authentication error codes
 	ErrCodeInvalidJoinToken = "invalid_join_token"
 	ErrCodeExpiredJoinToken = "expired_join_token"
-	ErrCodeHostAuthFailed   = "host_auth_failed"
+	ErrCodeBrokerAuthFailed   = "broker_auth_failed"
 	ErrCodeInvalidSignature = "invalid_signature"
 	ErrCodeClockSkew        = "clock_skew"
 	ErrCodeReplayDetected   = "replay_detected"
@@ -169,37 +169,37 @@ func MethodNotAllowed(w http.ResponseWriter) {
 		"Method not allowed", nil)
 }
 
-// RuntimeError writes a 502 Bad Gateway response for runtime host errors.
+// RuntimeError writes a 502 Bad Gateway response for runtime broker errors.
 func RuntimeError(w http.ResponseWriter, message string) {
 	writeError(w, http.StatusBadGateway, ErrCodeRuntimeError, message, nil)
 }
 
-// GatewayTimeout writes a 504 Gateway Timeout response for runtime host timeouts.
+// GatewayTimeout writes a 504 Gateway Timeout response for runtime broker timeouts.
 func GatewayTimeout(w http.ResponseWriter, message string) {
 	writeError(w, http.StatusGatewayTimeout, ErrCodeUnavailable, message, nil)
 }
 
-// NoRuntimeHost writes a 422 Unprocessable Entity response when no runtime host
+// NoRuntimeHost writes a 422 Unprocessable Entity response when no runtime broker
 // is available for agent creation. Includes available hosts as alternatives.
 func NoRuntimeHost(w http.ResponseWriter, message string, availableHosts []RuntimeBrokerSummary) {
 	details := map[string]interface{}{
 		"availableHosts": availableHosts,
 	}
-	writeError(w, http.StatusUnprocessableEntity, ErrCodeNoRuntimeHost, message, details)
+	writeError(w, http.StatusUnprocessableEntity, ErrCodeNoRuntimeBroker, message, details)
 }
 
 // RuntimeBrokerUnavailable writes a 503 Service Unavailable response when the
-// specified runtime host is not available.
+// specified runtime broker is not available.
 func RuntimeBrokerUnavailable(w http.ResponseWriter, brokerID string, availableHosts []RuntimeBrokerSummary) {
 	details := map[string]interface{}{
 		"requestedHostId": brokerID,
 		"availableHosts":  availableHosts,
 	}
-	writeError(w, http.StatusServiceUnavailable, ErrCodeRuntimeHostUnavail,
-		"Specified runtime host is unavailable", details)
+	writeError(w, http.StatusServiceUnavailable, ErrCodeRuntimeBrokerUnavail,
+		"Specified runtime broker is unavailable", details)
 }
 
-// RuntimeBrokerSummary is a minimal representation of a runtime host for error responses.
+// RuntimeBrokerSummary is a minimal representation of a runtime broker for error responses.
 type RuntimeBrokerSummary struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`

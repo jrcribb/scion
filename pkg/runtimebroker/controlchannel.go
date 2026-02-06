@@ -21,13 +21,13 @@ import (
 type ControlChannelConfig struct {
 	// HubEndpoint is the base URL of the Hub API.
 	HubEndpoint string
-	// HostID is the unique identifier for this runtime host.
+	// HostID is the unique identifier for this runtime broker.
 	BrokerID string
 	// SecretKey is the HMAC secret key for authentication.
 	SecretKey []byte
-	// Version is the runtime host version string.
+	// Version is the runtime broker version string.
 	Version string
-	// Groves is a list of grove IDs this host serves.
+	// Groves is a list of grove IDs this broker serves.
 	Groves []string
 
 	// ReconnectBackoff configuration

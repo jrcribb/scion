@@ -129,7 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_groves_slug ON groves(slug);
 CREATE INDEX IF NOT EXISTS idx_groves_git_remote ON groves(git_remote);
 CREATE INDEX IF NOT EXISTS idx_groves_owner ON groves(owner_id);
 
--- Runtime hosts table
+-- Runtime brokers table
 CREATE TABLE IF NOT EXISTS runtime_brokers (
 	id TEXT PRIMARY KEY,
 	name TEXT NOT NULL,
@@ -240,7 +240,7 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 // Migration V2: Add default_runtime_broker_id to groves
 const migrationV2 = `
--- Add default runtime host to groves
+-- Add default runtime broker to groves
 ALTER TABLE groves ADD COLUMN default_runtime_broker_id TEXT REFERENCES runtime_brokers(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_groves_default_runtime_broker ON groves(default_runtime_broker_id);
 `
@@ -403,7 +403,7 @@ const migrationV8 = `
 ALTER TABLE agents ADD COLUMN message TEXT;
 `
 
-// Migration V9: Host secrets and join tokens for Runtime Host authentication
+// Migration V9: Host secrets and join tokens for Runtime Broker authentication
 const migrationV9 = `
 -- Host secrets table for HMAC-based authentication
 CREATE TABLE IF NOT EXISTS broker_secrets (
@@ -860,7 +860,7 @@ func (s *SQLiteStore) GetGrove(ctx context.Context, id string) (*store.Grove, er
 
 	// Populate computed fields
 	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agents WHERE grove_id = ?", id).Scan(&grove.AgentCount)
-	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND status = 'online'", id).Scan(&grove.ActiveHostCount)
+	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND status = 'online'", id).Scan(&grove.ActiveBrokerCount)
 
 	return grove, nil
 }
@@ -1023,7 +1023,7 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 
 		// Populate computed fields
 		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agents WHERE grove_id = ?", grove.ID).Scan(&grove.AgentCount)
-		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND status = 'online'", grove.ID).Scan(&grove.ActiveHostCount)
+		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND status = 'online'", grove.ID).Scan(&grove.ActiveBrokerCount)
 
 		groves = append(groves, grove)
 	}
@@ -1878,7 +1878,7 @@ func (s *SQLiteStore) GetGroveContributors(ctx context.Context, groveID string) 
 	return contributors, nil
 }
 
-func (s *SQLiteStore) GetHostGroves(ctx context.Context, brokerID string) ([]store.GroveContributor, error) {
+func (s *SQLiteStore) GetBrokerGroves(ctx context.Context, brokerID string) ([]store.GroveContributor, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT grove_id, broker_id, broker_name, local_path, mode, status, profiles, last_seen
 		FROM grove_contributors WHERE broker_id = ?

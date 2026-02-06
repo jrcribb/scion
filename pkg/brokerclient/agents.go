@@ -9,7 +9,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/runtimebroker"
 )
 
-// AgentService handles agent operations on a runtime host.
+// AgentService handles agent operations on a runtime broker.
 type AgentService interface {
 	// List returns agents on this host.
 	List(ctx context.Context, opts *ListAgentsOptions) (*runtimehost.ListAgentsResponse, error)

@@ -58,7 +58,7 @@ type Store interface {
 	// API Key operations
 	APIKeyStore
 
-	// Host Secret operations (Runtime Host authentication)
+	// Host Secret operations (Runtime Broker authentication)
 	BrokerSecretStore
 }
 
@@ -154,40 +154,40 @@ type GroveFilter struct {
 	OwnerID         string
 	Visibility      string
 	GitRemotePrefix string
-	BrokerID string // Filter by contributing host
+	BrokerID string // Filter by contributing broker
 	Name            string // Filter by exact name (case-insensitive)
 }
 
-// RuntimeBrokerStore defines runtime host persistence operations.
+// RuntimeBrokerStore defines runtime broker persistence operations.
 type RuntimeBrokerStore interface {
-	// CreateRuntimeBroker creates a new runtime host record.
+	// CreateRuntimeBroker creates a new runtime broker record.
 	CreateRuntimeBroker(ctx context.Context, broker *RuntimeBroker) error
 
-	// GetRuntimeBroker retrieves a runtime host by ID.
+	// GetRuntimeBroker retrieves a runtime broker by ID.
 	// Returns ErrNotFound if the host doesn't exist.
 	GetRuntimeBroker(ctx context.Context, id string) (*RuntimeBroker, error)
 
-	// GetRuntimeBrokerByName retrieves a runtime host by its name (case-insensitive).
-	// This is used to prevent duplicate hosts with the same name.
+	// GetRuntimeBrokerByName retrieves a runtime broker by its name (case-insensitive).
+	// This is used to prevent duplicate brokers with the same name.
 	// Returns ErrNotFound if the host doesn't exist.
 	GetRuntimeBrokerByName(ctx context.Context, name string) (*RuntimeBroker, error)
 
-	// UpdateRuntimeBroker updates an existing runtime host.
+	// UpdateRuntimeBroker updates an existing runtime broker.
 	// Returns ErrNotFound if the host doesn't exist.
 	UpdateRuntimeBroker(ctx context.Context, broker *RuntimeBroker) error
 
-	// DeleteRuntimeBroker removes a runtime host by ID.
+	// DeleteRuntimeBroker removes a runtime broker by ID.
 	// Returns ErrNotFound if the host doesn't exist.
 	DeleteRuntimeBroker(ctx context.Context, id string) error
 
-	// ListRuntimeBrokers returns runtime hosts matching the filter criteria.
+	// ListRuntimeBrokers returns runtime brokers matching the filter criteria.
 	ListRuntimeBrokers(ctx context.Context, filter RuntimeBrokerFilter, opts ListOptions) (*ListResult[RuntimeBroker], error)
 
 	// UpdateRuntimeBrokerHeartbeat updates the last heartbeat and status.
 	UpdateRuntimeBrokerHeartbeat(ctx context.Context, id string, status string) error
 }
 
-// RuntimeBrokerFilter defines criteria for filtering runtime hosts.
+// RuntimeBrokerFilter defines criteria for filtering runtime brokers.
 type RuntimeBrokerFilter struct {
 	Status  string
 	Mode    string
@@ -277,8 +277,8 @@ type GroveContributorStore interface {
 	// GetGroveContributors returns all contributors to a grove.
 	GetGroveContributors(ctx context.Context, groveID string) ([]GroveContributor, error)
 
-	// GetHostGroves returns all groves a host contributes to.
-	GetHostGroves(ctx context.Context, brokerID string) ([]GroveContributor, error)
+	// GetBrokerGroves returns all groves a host contributes to.
+	GetBrokerGroves(ctx context.Context, brokerID string) ([]GroveContributor, error)
 
 	// UpdateContributorStatus updates a contributor's status and last seen time.
 	UpdateContributorStatus(ctx context.Context, groveID, brokerID, status string) error
@@ -506,16 +506,16 @@ type APIKeyStore interface {
 }
 
 // =============================================================================
-// Host Secrets (Runtime Host Authentication)
+// Host Secrets (Runtime Broker Authentication)
 // =============================================================================
 
-// BrokerSecretStore defines host secret persistence operations.
+// BrokerSecretStore defines broker secret persistence operations.
 type BrokerSecretStore interface {
-	// CreateBrokerSecret creates a new host secret record.
+	// CreateBrokerSecret creates a new broker secret record.
 	// Returns ErrAlreadyExists if a secret for this host already exists.
 	CreateBrokerSecret(ctx context.Context, secret *BrokerSecret) error
 
-	// GetBrokerSecret retrieves a host secret by host ID.
+	// GetBrokerSecret retrieves a broker secret by host ID.
 	// Returns ErrNotFound if the secret doesn't exist.
 	GetBrokerSecret(ctx context.Context, brokerID string) (*BrokerSecret, error)
 
@@ -524,11 +524,11 @@ type BrokerSecretStore interface {
 	// Returns an empty slice if no secrets exist.
 	GetActiveSecrets(ctx context.Context, brokerID string) ([]*BrokerSecret, error)
 
-	// UpdateBrokerSecret updates an existing host secret.
+	// UpdateBrokerSecret updates an existing broker secret.
 	// Returns ErrNotFound if the secret doesn't exist.
 	UpdateBrokerSecret(ctx context.Context, secret *BrokerSecret) error
 
-	// DeleteBrokerSecret removes a host secret.
+	// DeleteBrokerSecret removes a broker secret.
 	// Returns ErrNotFound if the secret doesn't exist.
 	DeleteBrokerSecret(ctx context.Context, brokerID string) error
 

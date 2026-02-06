@@ -1,5 +1,5 @@
 // Package templatecache provides a content-addressable local cache for templates.
-// Runtime Hosts use this cache to store templates fetched from the Hub's cloud storage,
+// Runtime Brokers use this cache to store templates fetched from the Hub's cloud storage,
 // enabling efficient agent creation without repeated downloads.
 package templatecache
 

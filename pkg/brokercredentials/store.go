@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	// DefaultFileName is the default name of the host credentials file.
+	// DefaultFileName is the default name of the broker credentials file.
 	DefaultFileName = "broker-credentials.json"
 	// FileMode is the file permissions for the credentials file (owner read/write only).
 	FileMode = 0600
@@ -24,12 +24,12 @@ const (
 
 var (
 	// ErrNotFound is returned when no credentials are found.
-	ErrNotFound = errors.New("host credentials not found")
+	ErrNotFound = errors.New("broker credentials not found")
 	// ErrInvalidCredentials is returned when credentials are malformed.
-	ErrInvalidCredentials = errors.New("invalid host credentials")
+	ErrInvalidCredentials = errors.New("invalid broker credentials")
 )
 
-// BrokerCredentials contains the credentials for a Runtime Host.
+// BrokerCredentials contains the credentials for a Runtime Broker.
 type BrokerCredentials struct {
 	// HostID is the unique identifier for this host.
 	BrokerID string `json:"brokerId"`
@@ -41,7 +41,7 @@ type BrokerCredentials struct {
 	RegisteredAt time.Time `json:"registeredAt"`
 }
 
-// Store manages host credentials on the local filesystem.
+// Store manages broker credentials on the local filesystem.
 type Store struct {
 	path string
 	mu   sync.RWMutex
@@ -56,7 +56,7 @@ func NewStore(path string) *Store {
 	return &Store{path: path}
 }
 
-// DefaultPath returns the default path to the host credentials file.
+// DefaultPath returns the default path to the broker credentials file.
 // This is ~/.scion/broker-credentials.json
 func DefaultPath() string {
 	home, err := os.UserHomeDir()

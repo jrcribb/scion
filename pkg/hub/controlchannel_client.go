@@ -121,7 +121,7 @@ func (c *ControlChannelHostClient) doRequest(ctx context.Context, brokerID, meth
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("runtime host returned error %d: %s", resp.StatusCode, string(resp.Body))
+		return nil, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(resp.Body))
 	}
 
 	return resp, nil

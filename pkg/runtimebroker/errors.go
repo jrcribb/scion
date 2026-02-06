@@ -18,7 +18,7 @@ type ErrorResponse struct {
 	Error APIError `json:"error"`
 }
 
-// Error codes matching the Runtime Host API specification.
+// Error codes matching the Runtime Broker API specification.
 const (
 	ErrCodeInvalidRequest   = "invalid_request"
 	ErrCodeValidationError  = "validation_error"

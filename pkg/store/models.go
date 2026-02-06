@@ -64,7 +64,7 @@ type AgentAppliedConfig struct {
 	Model   string            `json:"model,omitempty"`
 	Task    string            `json:"task,omitempty"` // Initial task/prompt for the agent
 
-	// Template info for Runtime Host hydration
+	// Template info for Runtime Broker hydration
 	TemplateID   string `json:"templateId,omitempty"`   // Hub template ID for fetching
 	TemplateHash string `json:"templateHash,omitempty"` // Content hash for cache validation
 }
@@ -88,8 +88,8 @@ type Grove struct {
 	// Git integration
 	GitRemote string `json:"gitRemote,omitempty"` // Normalized git remote URL (unique)
 
-	// Runtime host configuration
-	// DefaultRuntimeBrokerID is the runtime host used when creating agents without
+	// Runtime broker configuration
+	// DefaultRuntimeBrokerID is the runtime broker used when creating agents without
 	// an explicit runtimeBrokerId. Set to the first host that registers with this grove.
 	DefaultRuntimeBrokerID string `json:"defaultRuntimeBrokerId,omitempty"`
 
@@ -108,7 +108,7 @@ type Grove struct {
 
 	// Computed fields (not stored, populated on read)
 	AgentCount      int `json:"agentCount,omitempty"`
-	ActiveHostCount int `json:"activeHostCount,omitempty"`
+	ActiveBrokerCount int `json:"activeBrokerCount,omitempty"`
 }
 
 // RuntimeBroker represents a compute node in the Hub database.
@@ -145,14 +145,14 @@ type RuntimeBroker struct {
 	Updated time.Time `json:"updated"`
 }
 
-// BrokerCapabilities describes what a runtime host can do.
+// BrokerCapabilities describes what a runtime broker can do.
 type BrokerCapabilities struct {
 	WebPTY bool `json:"webPty"`
 	Sync   bool `json:"sync"`
 	Attach bool `json:"attach"`
 }
 
-// BrokerProfile describes a runtime profile available on a host.
+// BrokerProfile describes a runtime profile available on a broker.
 type BrokerProfile struct {
 	Name      string `json:"name"`      // Profile name (e.g., "docker-default", "k8s-prod")
 	Type      string `json:"type"`      // docker, kubernetes, apple
@@ -161,7 +161,7 @@ type BrokerProfile struct {
 	Namespace string `json:"namespace,omitempty"` // K8s namespace
 }
 
-// GroveContributor links a runtime host to a grove.
+// GroveContributor links a runtime broker to a grove.
 type GroveContributor struct {
 	GroveID   string    `json:"groveId"`
 	BrokerID string    `json:"brokerId"`
@@ -309,10 +309,10 @@ const (
 )
 
 // =============================================================================
-// Host Authentication (Runtime Host HMAC Authentication)
+// Host Authentication (Runtime Broker HMAC Authentication)
 // =============================================================================
 
-// BrokerSecret stores the HMAC shared secret for a Runtime Host.
+// BrokerSecret stores the HMAC shared secret for a Runtime Broker.
 type BrokerSecret struct {
 	BrokerID string    `json:"brokerId"`
 	SecretKey []byte    `json:"-"` // Never serialize - stored encrypted at rest
@@ -372,7 +372,7 @@ type ListResult[T any] struct {
 }
 
 // EnvVar represents an environment variable stored in the Hub database.
-// Environment variables are scoped to users, groves, or runtime hosts.
+// Environment variables are scoped to users, groves, or runtime brokers.
 type EnvVar struct {
 	// Identity
 	ID  string `json:"id"`  // UUID primary key

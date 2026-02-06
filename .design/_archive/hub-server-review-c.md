@@ -34,7 +34,7 @@ Additionally, configuration types exist in:
 | Grove path | `GrovePath` (filesystem) | — |
 | Hub endpoint | `HubEndpoint` | — |
 | Profile | `Profile` | — |
-| Runtime Host Type | `RuntimeHostType` | — |
+| Runtime Broker Type | `RuntimeBrokerType` | — |
 | Connection State | — | `ConnectionState` |
 
 **Impact:** Code converting between these types must handle missing fields, and the semantic meaning of `ID` differs between types.
@@ -65,7 +65,7 @@ type ListAgentsResponse struct {
 }
 ```
 
-Similar patterns exist for all entities: Grove, RuntimeHost, Template, User.
+Similar patterns exist for all entities: Grove, RuntimeBroker, Template, User.
 
 **Impact:**
 - Internal implementation details leak to API consumers

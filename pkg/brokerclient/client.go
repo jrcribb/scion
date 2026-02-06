@@ -1,4 +1,4 @@
-// Package hostclient provides a Go client for the Scion Runtime Host API.
+// Package hostclient provides a Go client for the Scion Runtime Broker API.
 package brokerclient
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/runtimebroker"
 )
 
-// Client is the interface for the Runtime Host API client.
+// Client is the interface for the Runtime Broker API client.
 type Client interface {
 	// Agents returns the agent operations interface.
 	Agents() AgentService
@@ -28,7 +28,7 @@ type client struct {
 	agents    *agentService
 }
 
-// New creates a new Runtime Host API client.
+// New creates a new Runtime Broker API client.
 func New(baseURL string, opts ...Option) (Client, error) {
 	c := &client{
 		transport: apiclient.NewTransport(baseURL),
@@ -66,7 +66,7 @@ func (c *client) Health(ctx context.Context) (*runtimehost.HealthResponse, error
 	return apiclient.DecodeResponse[runtimehost.HealthResponse](resp)
 }
 
-// Option configures a Runtime Host client.
+// Option configures a Runtime Broker client.
 type Option func(*client)
 
 // WithBearerToken sets Bearer token authentication.
@@ -76,7 +76,7 @@ func WithBearerToken(token string) Option {
 	}
 }
 
-// WithBrokerToken sets Runtime Host token authentication.
+// WithBrokerToken sets Runtime Broker token authentication.
 func WithBrokerToken(token string) Option {
 	return func(c *client) {
 		c.transport.Auth = &apiclient.BrokerTokenAuth{Token: token}

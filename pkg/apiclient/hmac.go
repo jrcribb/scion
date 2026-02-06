@@ -24,7 +24,7 @@ const (
 	HeaderSignedHeaders = "X-Scion-Signed-Headers"
 )
 
-// HMACAuth implements HMAC-based authentication for Runtime Hosts.
+// HMACAuth implements HMAC-based authentication for Runtime Brokers.
 // This authenticator signs requests using the same algorithm as pkg/hub/hostauth.go.
 type HMACAuth struct {
 	BrokerID string

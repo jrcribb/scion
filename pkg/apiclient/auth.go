@@ -44,7 +44,7 @@ func (a *APIKeyAuth) ApplyAuth(req *http.Request) error {
 // Refresh indicates that refresh is not supported for API keys.
 func (a *APIKeyAuth) Refresh() (bool, error) { return false, nil }
 
-// BrokerTokenAuth implements Runtime Host token authentication.
+// BrokerTokenAuth implements Runtime Broker token authentication.
 type BrokerTokenAuth struct {
 	Token string
 }

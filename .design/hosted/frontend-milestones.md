@@ -469,7 +469,7 @@ nats pub agent.test123.status '{"status":"running"}'
 The Koa server proxies WebSocket connections to the Hub API:
 
 ```
-Browser WS → Koa WS Proxy → Hub API WS → Runtime Host
+Browser WS → Koa WS Proxy → Hub API WS → Runtime Broker
 ```
 
 ---

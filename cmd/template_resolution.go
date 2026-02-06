@@ -263,7 +263,7 @@ func promptForLocalTemplateUpload(ctx context.Context, hubCtx *HubContext, local
 
 	fmt.Printf("\nTemplate '%s' was not found on the Hub but exists locally at:\n", localTemplate.Name)
 	fmt.Printf("  %s\n\n", localTemplate.Path)
-	fmt.Println("The Runtime Host cannot access local templates. Would you like to:")
+	fmt.Println("The Runtime Broker cannot access local templates. Would you like to:")
 	fmt.Printf("  [U] Upload template to Hub (%s scope) and continue\n", effectiveScope)
 	fmt.Println("  [C] Cancel agent creation")
 	fmt.Println()

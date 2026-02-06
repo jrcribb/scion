@@ -402,11 +402,11 @@ func createAgentWithHostResolution(ctx context.Context, hubCtx *HubContext, grov
 		}
 
 		var apiErr *apiclient.APIError
-		if !errors.As(err, &apiErr) || apiErr.Code != "no_runtime_host" {
+		if !errors.As(err, &apiErr) || apiErr.Code != "no_runtime_broker" {
 			return nil, err
 		}
 
-		// Handle ambiguous host
+		// Handle ambiguous broker
 		availableHosts, ok := apiErr.Details["availableHosts"].([]interface{})
 		if !ok || len(availableHosts) == 0 {
 			return nil, err
@@ -417,7 +417,7 @@ func createAgentWithHostResolution(ctx context.Context, hubCtx *HubContext, grov
 			return nil, err
 		}
 
-		fmt.Printf("\nMultiple runtime hosts available for grove:\n")
+		fmt.Printf("\nMultiple runtime brokers available for grove:\n")
 		for i, h := range availableHosts {
 			hostMap, _ := h.(map[string]interface{})
 			name, _ := hostMap["name"].(string)
@@ -428,7 +428,7 @@ func createAgentWithHostResolution(ctx context.Context, hubCtx *HubContext, grov
 
 		reader := bufio.NewReader(os.Stdin)
 		for {
-			fmt.Print("Select a host (or 'c' to cancel): ")
+			fmt.Print("Select a broker (or 'c' to cancel): ")
 			input, err := reader.ReadString('\n')
 			if err != nil {
 				return nil, fmt.Errorf("failed to read input: %w", err)
@@ -449,6 +449,6 @@ func createAgentWithHostResolution(ctx context.Context, hubCtx *HubContext, grov
 			req.RuntimeBrokerID, _ = selectedHost["id"].(string)
 			break
 		}
-		// Loop and retry with selected host
+		// Loop and retry with selected broker
 	}
 }

@@ -17,7 +17,7 @@
 6. [Storage Layout](#6-storage-layout)
 7. [API Specification](#7-api-specification)
 8. [CLI Interface](#8-cli-interface)
-9. [Runtime Host Integration](#9-runtime-host-integration)
+9. [Runtime Broker Integration](#9-runtime-broker-integration)
 10. [Code Reuse and Factoring](#10-code-reuse-and-factoring)
 11. [Incremental Sync](#11-incremental-sync)
 12. [Security Considerations](#12-security-considerations)
@@ -33,7 +33,7 @@
 
 The hosted architecture milestone requires workspace synchronization between remote agents and the local CLI. Currently:
 
-- Agents run on Runtime Hosts that may be behind NAT or on different machines
+- Agents run on Runtime Brokers that may be behind NAT or on different machines
 - The CLI needs to retrieve workspace changes made by agents
 - The CLI needs to push local changes to running agents
 - The existing local sync (`cmd/sync.go`) uses tar-based or mutagen sync, which doesn't work across the Hub
@@ -45,13 +45,13 @@ See [milestone-walkthrough.md](milestone-walkthrough.md) Section 2.3 - workspace
 **What Exists:**
 - Local sync via `scion sync to/from <agent>` using tar or mutagen
 - Template storage using GCS with signed URLs (see [hosted-templates.md](hosted-templates.md))
-- WebSocket control channel for Hub → Runtime Host communication (see [runtimehost-websocket.md](runtimehost-websocket.md))
+- WebSocket control channel for Hub → Runtime Broker communication (see [runtimebroker-websocket.md](runtimebroker-websocket.md))
 - Storage abstraction layer (`pkg/storage/storage.go`)
 - File collection utilities (`pkg/hubclient/manifest.go`)
 
 **What's Missing:**
 - Hub endpoints for workspace sync
-- Runtime Host workspace upload/download handlers
+- Runtime Broker workspace upload/download handlers
 - CLI hosted sync mode
 - Workspace storage path conventions
 
@@ -78,7 +78,7 @@ This pattern provides excellent performance for large workspaces while keeping t
 | **Functional parity** | `scion sync to/from` works identically in solo and hosted modes |
 | **Incremental sync** | Only transfer changed files (via content hashing) |
 | **Large workspace support** | Handle multi-GB workspaces efficiently |
-| **NAT traversal** | Work with Runtime Hosts behind NAT/firewalls |
+| **NAT traversal** | Work with Runtime Brokers behind NAT/firewalls |
 | **Code reuse** | Leverage template storage infrastructure |
 | **Bidirectional** | Support both push (to agent) and pull (from agent) |
 
@@ -99,7 +99,7 @@ This pattern provides excellent performance for large workspaces while keeping t
 ### 3.1 Option A: Tar via Hub Relay (Staged)
 
 ```
-CLI → HTTP → Hub (temp file) → Control Channel → Runtime Host
+CLI → HTTP → Hub (temp file) → Control Channel → Runtime Broker
                 ↓
          Hub stores tar temporarily
                 ↓
@@ -119,7 +119,7 @@ CLI ← HTTP ← Hub
 ### 3.2 Option B: HTTP Streaming through Hub
 
 ```
-CLI → HTTP → Hub → Control Channel → Runtime Host
+CLI → HTTP → Hub → Control Channel → Runtime Broker
        ←────── tar stream (pass-through) ──────
 ```
 
@@ -135,7 +135,7 @@ CLI → HTTP → Hub → Control Channel → Runtime Host
 ### 3.3 Option C: GCS Direct Sync (rclone)
 
 ```
-Runtime Host → rclone sync → GCS bucket
+Runtime Broker → rclone sync → GCS bucket
 CLI → rclone sync ← GCS bucket
 ```
 
@@ -156,7 +156,7 @@ CLI → rclone sync ← GCS bucket
     ┌────────────────┴────────────────┐
     │                                  │
     ▼                                  ▼
-   CLI ──────── signed URLs ──────── GCS ←───── Runtime Host
+   CLI ──────── signed URLs ──────── GCS ←───── Runtime Broker
          (direct upload/download)
 ```
 
@@ -169,7 +169,7 @@ CLI → rclone sync ← GCS bucket
 
 **Cons:**
 - Medium implementation effort
-- Requires Runtime Host to sync to GCS first
+- Requires Runtime Broker to sync to GCS first
 
 **This is the recommended approach** - see Section 4 for details.
 
@@ -193,7 +193,7 @@ CLI → rclone sync ← GCS bucket
 Apply the same pattern used for templates (see [hosted-templates.md](hosted-templates.md) Section 2):
 
 1. **Hub as Coordinator:** Hub generates signed URLs and stores metadata, but never touches file content
-2. **Direct Storage Access:** CLI and Runtime Host both access GCS directly via signed URLs
+2. **Direct Storage Access:** CLI and Runtime Broker both access GCS directly via signed URLs
 3. **Manifest-Based Sync:** File manifest with content hashes enables incremental sync
 4. **Existing Infrastructure:** Reuse `pkg/storage`, `pkg/hubclient/manifest.go`, signed URL generation
 
@@ -201,7 +201,7 @@ Apply the same pattern used for templates (see [hosted-templates.md](hosted-temp
 
 ```
 ┌─────────┐         ┌─────────┐         ┌─────────────┐         ┌─────────┐
-│   CLI   │         │   Hub   │         │ Runtime Host│         │   GCS   │
+│   CLI   │         │   Hub   │         │ Runtime Broker│         │   GCS   │
 └────┬────┘         └────┬────┘         └──────┬──────┘         └────┬────┘
      │                   │                     │                      │
      │ POST /agents/{id}/workspace/sync-from   │                      │
@@ -231,7 +231,7 @@ Apply the same pattern used for templates (see [hosted-templates.md](hosted-temp
 
 ```
 ┌─────────┐         ┌─────────┐         ┌─────────────┐         ┌─────────┐
-│   CLI   │         │   Hub   │         │ Runtime Host│         │   GCS   │
+│   CLI   │         │   Hub   │         │ Runtime Broker│         │   GCS   │
 └────┬────┘         └────┬────┘         └──────┬──────┘         └────┬────┘
      │                   │                     │                      │
      │ POST /agents/{id}/workspace/sync-to     │                      │
@@ -272,8 +272,8 @@ Apply the same pattern used for templates (see [hosted-templates.md](hosted-temp
 | Component | Responsibility |
 |-----------|----------------|
 | **CLI** | Collect local files, upload/download via signed URLs, apply to local workspace |
-| **Hub** | Generate signed URLs, coordinate sync requests, tunnel commands to Runtime Host |
-| **Runtime Host** | Upload workspace to GCS, download from GCS and apply to container |
+| **Hub** | Generate signed URLs, coordinate sync requests, tunnel commands to Runtime Broker |
+| **Runtime Broker** | Upload workspace to GCS, download from GCS and apply to container |
 | **GCS** | Store workspace snapshots, serve signed URL requests |
 
 ### 5.2 High-Level Data Flow
@@ -293,7 +293,7 @@ Apply the same pattern used for templates (see [hosted-templates.md](hosted-temp
               │                           │                       │
               ▼                           │                       ▼
        ┌─────────────┐                    │              ┌─────────────────┐
-       │   Scion     │                    │              │  Runtime Host   │
+       │   Scion     │                    │              │  Runtime Broker   │
        │   CLI       │                    │              │                 │
        │             │◄───────────────────┘              │  ┌───────────┐  │
        │  Workspace  │    Signed URLs                    │  │ Container │  │
@@ -309,7 +309,7 @@ Apply the same pattern used for templates (see [hosted-templates.md](hosted-temp
 
 ### 5.3 Integration with Control Channel
 
-For Runtime Hosts behind NAT, the Hub uses the WebSocket control channel to tunnel HTTP requests (see [runtimehost-websocket.md](runtimehost-websocket.md) Section 3.3).
+For Runtime Brokers behind NAT, the Hub uses the WebSocket control channel to tunnel HTTP requests (see [runtimebroker-websocket.md](runtimebroker-websocket.md) Section 3.3).
 
 The sync commands are tunneled as standard HTTP requests:
 - `POST /api/v1/workspace/upload` - Trigger workspace upload to GCS
@@ -368,7 +368,7 @@ The workspace manifest mirrors the template manifest format:
   "agentId": "agent-abc123",
   "groveId": "grove-xyz",
   "syncedAt": "2026-02-03T10:30:00Z",
-  "syncedFrom": "runtime-host",
+  "syncedFrom": "runtime-broker",
   "contentHash": "sha256:abc123...",
   "files": [
     {
@@ -395,7 +395,7 @@ Optional metadata for tracking sync history:
 {
   "lastSyncFrom": {
     "timestamp": "2026-02-03T10:30:00Z",
-    "source": "runtime-host",
+    "source": "runtime-broker",
     "contentHash": "sha256:abc123..."
   },
   "lastSyncTo": {
@@ -414,7 +414,7 @@ Optional metadata for tracking sync history:
 
 #### 7.1.1 Initiate Sync FROM Agent
 
-Triggers Runtime Host to upload workspace to GCS, returns signed download URLs.
+Triggers Runtime Broker to upload workspace to GCS, returns signed download URLs.
 
 ```
 POST /api/v1/agents/{agentId}/workspace/sync-from
@@ -452,7 +452,7 @@ POST /api/v1/agents/{agentId}/workspace/sync-from
 **Errors:**
 - `404 Not Found` - Agent not found
 - `409 Conflict` - Agent not running
-- `504 Gateway Timeout` - Runtime Host unreachable
+- `504 Gateway Timeout` - Runtime Broker unreachable
 
 #### 7.1.2 Initiate Sync TO Agent
 
@@ -546,7 +546,7 @@ GET /api/v1/agents/{agentId}/workspace
 }
 ```
 
-### 7.2 Runtime Host Endpoints
+### 7.2 Runtime Broker Endpoints
 
 These endpoints are called by the Hub via the control channel tunnel.
 
@@ -643,7 +643,7 @@ return rt.Sync(ctx, agentName, direction)
 ### 8.3 Example Usage
 
 ```bash
-# Start an agent on remote Runtime Host
+# Start an agent on remote Runtime Broker
 scion start my-agent --type claude "Fix the login bug"
 
 # Agent makes changes to workspace...
@@ -685,14 +685,14 @@ Would skip 12 unchanged files
 
 ---
 
-## 9. Runtime Host Integration
+## 9. Runtime Broker Integration
 
 ### 9.1 Workspace Upload Handler
 
-The Runtime Host implements workspace upload using the existing rclone integration:
+The Runtime Broker implements workspace upload using the existing rclone integration:
 
 ```go
-// pkg/runtimehost/workspace_handlers.go
+// pkg/runtimebroker/workspace_handlers.go
 
 func (s *Server) handleWorkspaceUpload(w http.ResponseWriter, r *http.Request) {
     var req WorkspaceUploadRequest
@@ -771,7 +771,7 @@ func (s *Server) handleWorkspaceApply(w http.ResponseWriter, r *http.Request) {
 
 ### 9.3 Container Workspace Access
 
-The Runtime Host must access the agent container's workspace directory. For Docker:
+The Runtime Broker must access the agent container's workspace directory. For Docker:
 
 ```go
 func (s *Server) getAgentWorkspacePath(agentID string) (string, error) {
@@ -805,8 +805,8 @@ func (s *Server) getAgentWorkspacePath(agentID string) (string, error) {
 | `UploadFile()` | `pkg/hubclient/templates.go` | Upload to signed URLs |
 | `DownloadFile()` | `pkg/hubclient/templates.go` | Download from signed URLs |
 | `GenerateSignedURL()` | `pkg/storage/storage.go` | Create workspace URLs |
-| `SyncToGCS()` | `pkg/gcp/storage.go` | Runtime Host upload |
-| `SyncFromGCS()` | `pkg/gcp/storage.go` | Runtime Host download |
+| `SyncToGCS()` | `pkg/gcp/storage.go` | Runtime Broker upload |
+| `SyncFromGCS()` | `pkg/gcp/storage.go` | Runtime Broker download |
 
 ### 10.2 Shared Interface Extraction
 
@@ -1044,8 +1044,8 @@ func syncToIncremental(ctx context.Context, client *hubclient.Client, agentID, s
 ### 12.2 Authorization
 
 - User must have access to the agent (verified by Hub)
-- Runtime Host must be registered for the grove
-- HMAC authentication for Hub ↔ Runtime Host communication
+- Runtime Broker must be registered for the grove
+- HMAC authentication for Hub ↔ Runtime Broker communication
 
 ### 12.3 Content Validation
 
@@ -1132,16 +1132,16 @@ All open questions have been resolved with the following decisions:
 - [x] Add workspace routes to Hub router in `pkg/hub/server.go`
 - [x] Add request/response types using `transfer.FileInfo`
 
-### Phase 2: Runtime Host Handlers (Day 3) ✅
+### Phase 2: Runtime Broker Handlers (Day 3) ✅
 
-**Goal:** Implement workspace upload/apply on Runtime Host.
+**Goal:** Implement workspace upload/apply on Runtime Broker.
 
-- [x] Create `pkg/runtimehost/workspace_handlers.go`:
+- [x] Create `pkg/runtimebroker/workspace_handlers.go`:
   - [x] `handleWorkspaceUpload()` - `POST /api/v1/workspace/upload`
   - [x] `handleWorkspaceApply()` - `POST /api/v1/workspace/apply`
 - [x] Add `getAgentWorkspacePath()` for container workspace resolution
 - [x] Integrate with existing `pkg/gcp/storage.go` (SyncToGCS/SyncFromGCS)
-- [x] Add workspace routes to Runtime Host router
+- [x] Add workspace routes to Runtime Broker router
 - [x] Use `transfer.CollectFiles()` for manifest building
 - [x] Add `GetWorkspacePath()` method to Runtime interface (Docker, K8s, Apple Container)
 - [x] Add `StorageBucket` and `WorktreeBase` config options to ServerConfig
@@ -1173,9 +1173,9 @@ All open questions have been resolved with the following decisions:
 - [x] Integration tests:
   - [x] `pkg/transfer` unit tests
   - [x] Hub workspace endpoint tests (mock storage)
-  - [x] Runtime Host workspace handler tests
+  - [x] Runtime Broker workspace handler tests
   - [x] CLI sync command tests (mock hubclient)
-- [x] End-to-end test with real Hub/Runtime Host
+- [x] End-to-end test with real Hub/Runtime Broker
 - [x] CLI output formatting and progress display
 - [x] Error handling and edge cases:
   - [x] Agent not running
@@ -1195,7 +1195,7 @@ Day 1          Day 2              Day 3              Day 4          Day 5
 ┌──────────┐  ┌───────────────┐  ┌───────────────┐  ┌──────────┐  ┌─────────┐
 │ Phase 0  │  │   Phase 1     │  │   Phase 2     │  │ Phase 3  │  │ Phase 4 │
 │          │  │               │  │               │  │          │  │         │
-│ transfer │──│ Hub endpoints │──│ Runtime Host  │──│ CLI +    │──│ Testing │
+│ transfer │──│ Hub endpoints │──│ Runtime Broker  │──│ CLI +    │──│ Testing │
 │ package  │  │ + storage     │  │ handlers      │  │ hubclient│  │ + docs  │
 └──────────┘  └───────────────┘  └───────────────┘  └──────────┘  └─────────┘
      │              │                  │                  │
@@ -1214,9 +1214,9 @@ Day 1          Day 2              Day 3              Day 4          Day 5
 | [milestone-walkthrough.md](milestone-walkthrough.md) | Milestone requirements (Scenario 4) |
 | [hosted-templates.md](hosted-templates.md) | Template upload/download pattern (Sections 2, 5) |
 | [hosted-architecture.md](hosted-architecture.md) | Overall architecture context |
-| [runtimehost-websocket.md](runtimehost-websocket.md) | Control channel for NAT traversal (Section 3) |
+| [runtimebroker-websocket.md](runtimebroker-websocket.md) | Control channel for NAT traversal (Section 3) |
 | [hub-api.md](hub-api.md) | Hub API conventions |
-| [runtime-host-api.md](runtime-host-api.md) | Runtime Host API conventions |
+| [runtime-broker-api.md](runtime-broker-api.md) | Runtime Broker API conventions |
 
 ### Source Files
 
@@ -1228,7 +1228,7 @@ Day 1          Day 2              Day 3              Day 4          Day 5
 | `pkg/hubclient/templates.go` | Template client → refactor to use `pkg/transfer` |
 | `pkg/hubclient/workspace.go` | **New** - Workspace client (Phase 3) |
 | `pkg/hub/workspace_handlers.go` | **New** - Hub workspace endpoints (Phase 1) |
-| `pkg/runtimehost/workspace_handlers.go` | **New** - Runtime Host handlers (Phase 2) |
+| `pkg/runtimebroker/workspace_handlers.go` | **New** - Runtime Broker handlers (Phase 2) |
 | `pkg/gcp/storage.go` | rclone GCS integration (reuse existing) |
 | `cmd/sync.go` | Current sync command → extend for hosted mode |
 
@@ -1253,7 +1253,7 @@ pkg/
 │   ├── template_handlers.go     # EXISTING - uses transfer types
 │   └── workspace_handlers.go    # NEW - workspace sync endpoints
 │
-├── runtimehost/
+├── runtimebroker/
 │   └── workspace_handlers.go    # NEW - upload/apply handlers
 │
 └── storage/

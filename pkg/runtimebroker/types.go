@@ -31,7 +31,7 @@ type BrokerInfoResponse struct {
 	Groves       []GroveInfo       `json:"groves,omitempty"`
 }
 
-// BrokerProfile describes a runtime profile available on a host.
+// BrokerProfile describes a runtime profile available on a broker.
 type BrokerProfile struct {
 	Name      string `json:"name"`
 	Type      string `json:"type"`
@@ -40,7 +40,7 @@ type BrokerProfile struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// BrokerCapabilities describes what this runtime host can do.
+// BrokerCapabilities describes what this runtime broker can do.
 type BrokerCapabilities struct {
 	WebPTY bool `json:"webPty"`
 	Sync   bool `json:"sync"`
@@ -131,13 +131,13 @@ type CreateAgentRequest struct {
 	AgentToken  string             `json:"agentToken,omitempty"`
 
 	// ResolvedEnv contains the fully merged environment variables and secrets
-	// from all applicable scopes (user, grove, runtime host). These are resolved
+	// from all applicable scopes (user, grove, runtime broker). These are resolved
 	// by the Hub before dispatching the agent creation request.
-	// The Runtime Host should merge these with config.Env, with config.Env
+	// The Runtime Broker should merge these with config.Env, with config.Env
 	// taking precedence over ResolvedEnv.
 	ResolvedEnv map[string]string `json:"resolvedEnv,omitempty"`
 
-	// GrovePath is the local filesystem path to the grove on this runtime host.
+	// GrovePath is the local filesystem path to the grove on this runtime broker.
 	// This is provided by the Hub from the grove contributor record.
 	GrovePath string `json:"grovePath,omitempty"`
 }
@@ -160,7 +160,7 @@ type CreateAgentConfig struct {
 	Kubernetes  *api.KubernetesConfig `json:"kubernetes,omitempty"`
 
 	// TemplateID is the Hub template ID for cache lookup.
-	// When provided, the Runtime Host can use this to look up or fetch
+	// When provided, the Runtime Broker can use this to look up or fetch
 	// the template from the Hub and cache it locally.
 	TemplateID string `json:"templateId,omitempty"`
 

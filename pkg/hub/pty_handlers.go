@@ -85,17 +85,17 @@ func (s *Server) handleAgentPTY(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check if agent has a runtime host
+	// Check if agent has a runtime broker
 	if agent.RuntimeBrokerID == "" {
-		writeError(w, http.StatusUnprocessableEntity, ErrCodeNoRuntimeHost,
-			"Agent has no runtime host", nil)
+		writeError(w, http.StatusUnprocessableEntity, ErrCodeNoRuntimeBroker,
+			"Agent has no runtime broker", nil)
 		return
 	}
 
 	// Check if host is connected via control channel
 	if s.controlChannel == nil || !s.controlChannel.IsConnected(agent.RuntimeBrokerID) {
-		writeError(w, http.StatusServiceUnavailable, ErrCodeRuntimeHostUnavail,
-			"Runtime host not connected", nil)
+		writeError(w, http.StatusServiceUnavailable, ErrCodeRuntimeBrokerUnavail,
+			"Runtime broker not connected", nil)
 		return
 	}
 

@@ -759,7 +759,7 @@ func TestWorkspaceUpload_WithBucketInRequest(t *testing.T) {
 	if rec.Code == http.StatusBadRequest {
 		var errResp ErrorResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err == nil {
-			if errResp.Error.Message == "bucket is required (not configured on host)" {
+			if errResp.Error.Message == "bucket is required (not configured on broker)" {
 				t.Error("bucket in request should have been used instead of failing")
 			}
 		}
@@ -791,7 +791,7 @@ func TestWorkspaceApply_WithBucketInRequest(t *testing.T) {
 	if rec.Code == http.StatusBadRequest {
 		var errResp ErrorResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &errResp); err == nil {
-			if errResp.Error.Message == "bucket is required (not configured on host)" {
+			if errResp.Error.Message == "bucket is required (not configured on broker)" {
 				t.Error("bucket in request should have been used instead of failing")
 			}
 		}

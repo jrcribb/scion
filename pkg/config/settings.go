@@ -16,7 +16,7 @@ import (
 // Environment variables with SCION_ prefix override top-level settings.
 
 type RuntimeConfig struct {
-	Host      string            `json:"host,omitempty" yaml:"host,omitempty" koanf:"host"`
+	Host      string            `json:"broker,omitempty" yaml:"host,omitempty" koanf:"host"`
 	Context   string            `json:"context,omitempty" yaml:"context,omitempty" koanf:"context"`
 	Namespace string            `json:"namespace,omitempty" yaml:"namespace,omitempty" koanf:"namespace"`
 	Tmux      *bool             `json:"tmux,omitempty" yaml:"tmux,omitempty" koanf:"tmux"`

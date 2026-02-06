@@ -44,7 +44,7 @@ func DefaultControlChannelConfig() ControlChannelConfig {
 	}
 }
 
-// ControlChannelManager manages WebSocket connections from Runtime Hosts.
+// ControlChannelManager manages WebSocket connections from Runtime Brokers.
 type ControlChannelManager struct {
 	connections map[string]*BrokerConnection // brokerID -> connection
 	mu          sync.RWMutex
@@ -68,7 +68,7 @@ func NewControlChannelManager(config ControlChannelConfig) *ControlChannelManage
 	}
 }
 
-// BrokerConnection represents an active control channel connection to a Runtime Host.
+// BrokerConnection represents an active control channel connection to a Runtime Broker.
 type BrokerConnection struct {
 	brokerID    string
 	sessionID string

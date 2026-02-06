@@ -68,7 +68,7 @@ func (s *agentService) agentsPath() string {
 type ListAgentsOptions struct {
 	GroveID       string            // Filter by grove
 	Status        string            // Filter by status
-	RuntimeBrokerID string            // Filter by runtime host
+	RuntimeBrokerID string            // Filter by runtime broker
 	Labels        map[string]string // Label selector
 	Page          apiclient.PageOptions
 }

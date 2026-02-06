@@ -21,7 +21,7 @@ import (
 
 // PTYClientConfig holds configuration for the PTY client.
 type PTYClientConfig struct {
-	// Endpoint is the Hub or Runtime Host URL.
+	// Endpoint is the Hub or Runtime Broker URL.
 	Endpoint string
 	// Token is the Bearer token for authentication.
 	Token string
@@ -335,7 +335,7 @@ func AttachToAgent(ctx context.Context, endpoint, token, agentID string) error {
 	return client.Run()
 }
 
-// BuildDirectAttachURL builds a URL for direct attachment to a runtime host.
+// BuildDirectAttachURL builds a URL for direct attachment to a runtime broker.
 func BuildDirectAttachURL(hostEndpoint, agentID string, cols, rows int) (string, error) {
 	u, err := url.Parse(hostEndpoint)
 	if err != nil {

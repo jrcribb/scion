@@ -5,13 +5,13 @@
 
 ## 1. Overview
 
-This document specifies the REST API for the **Scion Hub** (State Server), the centralized service that manages agent state, groves, runtime hosts, templates, and users in the distributed Scion architecture.
+This document specifies the REST API for the **Scion Hub** (State Server), the centralized service that manages agent state, groves, runtime brokers, templates, and users in the distributed Scion architecture.
 
 The Hub API provides:
 - **Grove-Centric Registration**: Groves are the primary unit of registration. Runtime hosts register the groves they serve, not themselves as standalone entities.
 - **Git Remote Uniqueness**: Groves associated with git repositories are uniquely identified by their normalized git remote URL.
-- **Agent Lifecycle Management**: CRUD operations for agents across distributed runtime hosts
-- **Distributed Groves**: A single grove can span multiple runtime hosts (e.g., multiple developers on the same project)
+- **Agent Lifecycle Management**: CRUD operations for agents across distributed runtime brokers
+- **Distributed Groves**: A single grove can span multiple runtime brokers (e.g., multiple developers on the same project)
 - **Template Registry**: Centralized template storage and distribution
 - **Real-time Communication**: WebSocket endpoints for PTY access and status streaming
 - **Authentication & Authorization**: User management and access control
@@ -56,8 +56,8 @@ Represents a running or stopped agent instance.
   "detached": true,            // Whether running in detached mode
   "runtime": "string",         // Runtime type: docker, kubernetes, apple
 
-  "runtimeHostId": "string",   // ID of the Runtime Host managing this agent
-  "runtimeHostType": "string", // Type of runtime host
+  "runtimeBrokerId": "string",   // ID of the Runtime Broker managing this agent
+  "runtimeBrokerType": "string", // Type of runtime broker
   "webPtyEnabled": true,       // Whether web terminal access is available
   "taskSummary": "string",     // Current task description
 
@@ -148,7 +148,7 @@ Git remote URLs are normalized before storage to ensure consistent matching:
 - `git@github.com:acme/project.git` → `github.com/acme/project`
 - `ssh://git@gitlab.com/team/repo` → `gitlab.com/team/repo`
 
-### 2.3 RuntimeHost
+### 2.3 RuntimeBroker
 
 Represents a compute node that contributes to one or more groves. **Runtime hosts are not the primary registration unit**—they register the groves they serve. The Hub tracks hosts primarily for routing and health monitoring.
 
@@ -330,7 +330,7 @@ GET /api/v1/agents
 |-----------|------|-------------|
 | `groveId` | string | Filter by grove ID |
 | `status` | string | Filter by status (running, stopped, etc.) |
-| `runtimeHostId` | string | Filter by runtime host |
+| `runtimeBrokerId` | string | Filter by runtime broker |
 | `labels` | string | Label selector (e.g., `env=prod,team=platform`) |
 | `limit` | int | Maximum results (default: 50, max: 200) |
 | `cursor` | string | Pagination cursor |
@@ -367,7 +367,7 @@ POST /api/v1/agents
   "name": "string",            // Required: agent name
   "groveId": "string",         // Required: grove to create in
   "template": "string",        // Template name or ID
-  "runtimeHostId": "string",   // Target runtime host (optional, Hub selects if omitted)
+  "runtimeBrokerId": "string",   // Target runtime broker (optional, Hub selects if omitted)
 
   "task": "string",            // Initial task/prompt
   "branch": "string",          // Git branch to use
@@ -523,7 +523,7 @@ Internal endpoint for agents to report status updates.
 PUT /api/v1/agents/{agentId}
 ```
 
-Upsert endpoint for Runtime Hosts in read-only mode to register locally-created agents with the Hub. If the agent doesn't exist, it is created; if it exists, its state is updated.
+Upsert endpoint for Runtime Brokers in read-only mode to register locally-created agents with the Hub. If the agent doesn't exist, it is created; if it exists, its state is updated.
 
 **Request Body:**
 ```json
@@ -531,7 +531,7 @@ Upsert endpoint for Runtime Hosts in read-only mode to register locally-created 
   "name": "string",
   "groveId": "string",
   "template": "string",
-  "runtimeHostId": "string",   // The reporting host
+  "runtimeBrokerId": "string",   // The reporting host
 
   "status": "string",
   "containerStatus": "string",
@@ -557,7 +557,7 @@ Upsert endpoint for Runtime Hosts in read-only mode to register locally-created 
 - `X-Scion-Nonce`: Random nonce for replay prevention
 - `X-Scion-Signature`: HMAC-SHA256 signature
 
-See [Runtime Host Auth](auth/runtime-host-auth.md) for the complete authentication specification.
+See [Runtime Broker Auth](auth/runtime-broker-auth.md) for the complete authentication specification.
 
 **Response:**
 ```json
@@ -601,7 +601,7 @@ GET /api/v1/groves/{groveId}
 POST /api/v1/groves/register
 ```
 
-This is the **primary registration endpoint** for runtime hosts. It performs an upsert based on the git remote URL:
+This is the **primary registration endpoint** for runtime brokers. It performs an upsert based on the git remote URL:
 - If a grove with the same git remote exists: adds the host as a contributor
 - If no matching grove exists: creates a new grove with this host as the initial contributor
 
@@ -640,7 +640,7 @@ This is the **primary registration endpoint** for runtime hosts. It performs an 
 ```json
 {
   "grove": Grove,
-  "host": RuntimeHost,
+  "host": RuntimeBroker,
   "created": true,             // Whether grove was newly created (vs linked)
   "hostToken": "string"        // Authentication token for this host
 }
@@ -699,7 +699,7 @@ Returns agents belonging to a specific grove. Same response format as `GET /agen
 GET /api/v1/groves/{groveId}/contributors
 ```
 
-Returns runtime hosts contributing to this grove.
+Returns runtime brokers contributing to this grove.
 
 **Response:**
 ```json
@@ -760,14 +760,14 @@ PUT /api/v1/groves/{groveId}/settings
 
 ---
 
-## 5. Runtime Host Endpoints
+## 5. Runtime Broker Endpoints
 
 Runtime hosts are tracked by the Hub for routing and health monitoring, but **grove registration is the primary mechanism** for hosts to connect to the Hub. These endpoints provide administrative views and operations on known hosts.
 
-### 5.1 List Runtime Hosts
+### 5.1 List Runtime Brokers
 
 ```
-GET /api/v1/runtime-hosts
+GET /api/v1/runtime-brokers
 ```
 
 **Query Parameters:**
@@ -778,16 +778,16 @@ GET /api/v1/runtime-hosts
 | `mode` | string | Filter by mode (connected, read-only) |
 | `groveId` | string | Filter by grove contribution |
 
-### 5.2 Get Runtime Host
+### 5.2 Get Runtime Broker
 
 ```
-GET /api/v1/runtime-hosts/{hostId}
+GET /api/v1/runtime-brokers/{hostId}
 ```
 
 ### 5.3 List Host Groves
 
 ```
-GET /api/v1/runtime-hosts/{hostId}/groves
+GET /api/v1/runtime-brokers/{hostId}/groves
 ```
 
 Returns groves this host contributes to.
@@ -808,29 +808,29 @@ Returns groves this host contributes to.
 }
 ```
 
-### 5.4 Update Runtime Host
+### 5.4 Update Runtime Broker
 
 ```
-PATCH /api/v1/runtime-hosts/{hostId}
+PATCH /api/v1/runtime-brokers/{hostId}
 ```
 
 Updates host metadata (name, labels, etc.). Host capabilities and runtimes are updated via grove registration.
 
-### 5.5 Deregister Runtime Host
+### 5.5 Deregister Runtime Broker
 
 ```
-DELETE /api/v1/runtime-hosts/{hostId}
+DELETE /api/v1/runtime-brokers/{hostId}
 ```
 
 Removes the host from all groves and deletes its record. Agents running on this host are marked as orphaned.
 
-### 5.6 Runtime Host Heartbeat
+### 5.6 Runtime Broker Heartbeat
 
 ```
-POST /api/v1/runtime-hosts/{hostId}/heartbeat
+POST /api/v1/runtime-brokers/{hostId}/heartbeat
 ```
 
-Internal endpoint for runtime hosts to report health.
+Internal endpoint for runtime brokers to report health.
 
 **Request Body:**
 ```json
@@ -935,7 +935,7 @@ POST /api/v1/templates/{templateId}/clone
 
 ## 7. Environment Variables & Secrets Endpoints
 
-The Hub provides endpoints for managing environment variables and secrets scoped to users, groves, or runtime hosts. See `hosted-architecture.md` Section 6 for the full design.
+The Hub provides endpoints for managing environment variables and secrets scoped to users, groves, or runtime brokers. See `hosted-architecture.md` Section 6 for the full design.
 
 ### 7.1 Data Models
 
@@ -947,7 +947,7 @@ The Hub provides endpoints for managing environment variables and secrets scoped
   "key": "string",             // Variable name (e.g., "LOG_LEVEL")
   "value": "string",           // Variable value
 
-  "scope": "string",           // user, grove, runtime_host
+  "scope": "string",           // user, grove, runtime_broker
   "scopeId": "string",         // ID of the scoped entity
 
   "description": "string",     // Optional description
@@ -966,7 +966,7 @@ The Hub provides endpoints for managing environment variables and secrets scoped
   "id": "string",              // UUID
   "key": "string",             // Secret name (e.g., "API_KEY")
 
-  "scope": "string",           // user, grove, runtime_host
+  "scope": "string",           // user, grove, runtime_broker
   "scopeId": "string",         // ID of the scoped entity
 
   "description": "string",     // Optional description
@@ -994,8 +994,8 @@ Returns environment variables for the specified scope. Defaults to user scope.
 **Query Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `scope` | string | Scope type: `user`, `grove`, `runtime_host` (default: `user`) |
-| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+| `scope` | string | Scope type: `user`, `grove`, `runtime_broker` (default: `user`) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_broker) |
 | `key` | string | Filter by specific key (optional) |
 
 **Response:**
@@ -1019,7 +1019,7 @@ Returns a specific environment variable by key.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `scope` | string | Scope type (default: `user`) |
-| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_broker) |
 
 **Response:**
 ```json
@@ -1039,7 +1039,7 @@ Creates or updates an environment variable. Upsert semantics based on key + scop
 {
   "value": "string",           // Required: variable value
   "scope": "string",           // Scope type (default: user)
-  "scopeId": "string",         // Required for grove/runtime_host scope
+  "scopeId": "string",         // Required for grove/runtime_broker scope
   "description": "string",     // Optional description
   "sensitive": false           // Optional: mask value in responses
 }
@@ -1065,7 +1065,7 @@ Deletes an environment variable.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `scope` | string | Scope type (default: `user`) |
-| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_broker) |
 
 **Response:** `204 No Content`
 
@@ -1082,8 +1082,8 @@ Returns secret metadata for the specified scope. **Values are never returned.**
 **Query Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `scope` | string | Scope type: `user`, `grove`, `runtime_host` (default: `user`) |
-| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+| `scope` | string | Scope type: `user`, `grove`, `runtime_broker` (default: `user`) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_broker) |
 
 **Response:**
 ```json
@@ -1106,7 +1106,7 @@ Returns metadata for a specific secret. **Value is never returned.**
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `scope` | string | Scope type (default: `user`) |
-| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_broker) |
 
 **Response:**
 ```json
@@ -1126,7 +1126,7 @@ Creates or updates a secret. Upsert semantics based on key + scope + scopeId.
 {
   "value": "string",           // Required: secret value (write-only)
   "scope": "string",           // Scope type (default: user)
-  "scopeId": "string",         // Required for grove/runtime_host scope
+  "scopeId": "string",         // Required for grove/runtime_broker scope
   "description": "string"      // Optional description
 }
 ```
@@ -1151,7 +1151,7 @@ Deletes a secret.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `scope` | string | Scope type (default: `user`) |
-| `scopeId` | string | ID of the scoped entity (required for grove/runtime_host) |
+| `scopeId` | string | ID of the scoped entity (required for grove/runtime_broker) |
 
 **Response:** `204 No Content`
 
@@ -1207,16 +1207,16 @@ PUT    /api/v1/groves/{groveId}/secrets/{key}
 DELETE /api/v1/groves/{groveId}/secrets/{key}
 ```
 
-#### Runtime Host Scope
+#### Runtime Broker Scope
 ```
-GET    /api/v1/runtime-hosts/{hostId}/env
-GET    /api/v1/runtime-hosts/{hostId}/env/{key}
-PUT    /api/v1/runtime-hosts/{hostId}/env/{key}
-DELETE /api/v1/runtime-hosts/{hostId}/env/{key}
-GET    /api/v1/runtime-hosts/{hostId}/secrets
-GET    /api/v1/runtime-hosts/{hostId}/secrets/{key}
-PUT    /api/v1/runtime-hosts/{hostId}/secrets/{key}
-DELETE /api/v1/runtime-hosts/{hostId}/secrets/{key}
+GET    /api/v1/runtime-brokers/{hostId}/env
+GET    /api/v1/runtime-brokers/{hostId}/env/{key}
+PUT    /api/v1/runtime-brokers/{hostId}/env/{key}
+DELETE /api/v1/runtime-brokers/{hostId}/env/{key}
+GET    /api/v1/runtime-brokers/{hostId}/secrets
+GET    /api/v1/runtime-brokers/{hostId}/secrets/{key}
+PUT    /api/v1/runtime-brokers/{hostId}/secrets/{key}
+DELETE /api/v1/runtime-brokers/{hostId}/secrets/{key}
 ```
 
 ---
@@ -1254,7 +1254,7 @@ Browser WebSocket APIs cannot set custom HTTP headers. WebSocket endpoints suppo
 WS /api/v1/agents/{agentId}/pty
 ```
 
-Provides web terminal access to an agent. The Hub proxies the connection to the appropriate Runtime Host via the control channel (see Section 10).
+Provides web terminal access to an agent. The Hub proxies the connection to the appropriate Runtime Broker via the control channel (see Section 10).
 
 **Query Parameters:**
 | Parameter | Type | Description |
@@ -1279,7 +1279,7 @@ Provides web terminal access to an agent. The Hub proxies the connection to the 
 }
 ```
 
-**Stream Multiplexing:** When the Hub proxies PTY to a Runtime Host over the control channel, each stream is assigned a unique `streamId`. The Hub maintains the mapping between client WebSocket connections and control channel streams.
+**Stream Multiplexing:** When the Hub proxies PTY to a Runtime Broker over the control channel, each stream is assigned a unique `streamId`. The Hub maintains the mapping between client WebSocket connections and control channel streams.
 
 ### 8.3 Agent Status Stream
 
@@ -1314,7 +1314,7 @@ Real-time stream of all events (admin only).
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `groveId` | string | Filter by grove |
-| `runtimeHostId` | string | Filter by runtime host |
+| `runtimeBrokerId` | string | Filter by runtime broker |
 | `eventTypes` | string | Comma-separated event types |
 
 ---
@@ -1372,14 +1372,14 @@ All error responses follow a consistent format:
    X-Scion-Agent-Token: <token>
    ```
 
-4. **Host HMAC Authentication** (Runtime Host ↔ Hub)
+4. **Host HMAC Authentication** (Runtime Broker ↔ Hub)
    ```
    X-Scion-Broker-ID: <host-id>
    X-Scion-Timestamp: <RFC 3339 timestamp>
    X-Scion-Nonce: <base64-encoded nonce>
    X-Scion-Signature: <HMAC-SHA256 signature>
    ```
-   See [Runtime Host Auth](auth/runtime-host-auth.md) for the complete specification.
+   See [Runtime Broker Auth](auth/runtime-broker-auth.md) for the complete specification.
 
 ### 10.2 Authentication Endpoints
 
@@ -1406,11 +1406,11 @@ Role-based access control:
 
 #### Host Shared Secrets (HMAC Authentication)
 
-Runtime Hosts authenticate with the Hub using HMAC-based request signing. See [Runtime Host Auth](auth/runtime-host-auth.md) for the complete specification.
+Runtime Brokers authenticate with the Hub using HMAC-based request signing. See [Runtime Broker Auth](auth/runtime-broker-auth.md) for the complete specification.
 
 1. **Registration:** User creates a host record, receives a short-lived join token
 2. **Join:** Host exchanges join token for a shared secret (one-time transmission)
-3. **Storage:** Host stores secret securely (`~/.scion/host-credentials.json` or secret manager)
+3. **Storage:** Host stores secret securely (`~/.scion/broker-credentials.json` or secret manager)
 4. **Authentication:** All subsequent requests are HMAC-signed using the shared secret
 5. **Rotation:** Hub initiates secret rotation with grace period for dual-secret validation:
    ```
@@ -1457,7 +1457,7 @@ Runtime Hosts authenticate with the Hub using HMAC-based request signing. See [R
 
 ## 11. Host Control Plane Protocol
 
-Runtime Hosts often run behind NAT/firewalls (developer laptops, on-premise servers). The Hub cannot initiate HTTP connections to these hosts. Instead, **Runtime Hosts establish a persistent WebSocket control channel to the Hub**.
+Runtime Brokers often run behind NAT/firewalls (developer laptops, on-premise servers). The Hub cannot initiate HTTP connections to these hosts. Instead, **Runtime Brokers establish a persistent WebSocket control channel to the Hub**.
 
 The control channel is established **after grove registration**. The host must first register at least one grove via the REST API, then connect the control channel for real-time communication.
 
@@ -1465,7 +1465,7 @@ The control channel is established **after grove registration**. The host must f
 
 ```
 ┌─────────────────┐                    ┌─────────────────┐
-│   Scion Hub     │                    │  Runtime Host   │
+│   Scion Hub     │                    │  Runtime Broker   │
 │                 │◄───────────────────│  (behind NAT)   │
 │                 │   WebSocket        │                 │
 │  Control Plane  │   Control Channel  │  Host Agent     │
@@ -1485,10 +1485,10 @@ The control channel is established **after grove registration**. The host must f
 ### 11.2 Control Channel Connection
 
 ```
-WS /api/v1/runtime-hosts/connect
+WS /api/v1/runtime-brokers/connect
 ```
 
-Runtime Host initiates a persistent WebSocket connection to the Hub. The host must have already completed the registration flow and obtained a shared secret.
+Runtime Broker initiates a persistent WebSocket connection to the Hub. The host must have already completed the registration flow and obtained a shared secret.
 
 **Headers (HMAC Authentication):**
 - `X-Scion-Broker-ID`: Host identifier
@@ -1496,7 +1496,7 @@ Runtime Host initiates a persistent WebSocket connection to the Hub. The host mu
 - `X-Scion-Nonce`: Random nonce for replay prevention
 - `X-Scion-Signature`: HMAC-SHA256 signature of the WebSocket upgrade request
 
-Once the WebSocket is established with HMAC authentication, Hub→Host commands over the connection use session-based trust (no per-message signing required). Host→Hub requests that require authorization must use standard HMAC-authenticated HTTP requests. See [Runtime Host Auth](auth/runtime-host-auth.md) Section 10.5 for details.
+Once the WebSocket is established with HMAC authentication, Hub→Host commands over the connection use session-based trust (no per-message signing required). Host→Hub requests that require authorization must use standard HMAC-authenticated HTTP requests. See [Runtime Broker Auth](auth/runtime-broker-auth.md) Section 10.5 for details.
 
 **Initial Handshake Message (Host → Hub):**
 ```json
@@ -1542,7 +1542,7 @@ Once the WebSocket is established with HMAC authentication, Hub→Host commands 
 
 ### 11.3 Command Messages (Hub → Host)
 
-The Hub sends commands to Runtime Hosts over the control channel.
+The Hub sends commands to Runtime Brokers over the control channel.
 
 **Command Envelope:**
 ```json
@@ -1635,7 +1635,7 @@ The Hub sends commands to Runtime Hosts over the control channel.
 
 ### 11.5 Event Messages (Host → Hub)
 
-Runtime Hosts send unsolicited events to the Hub.
+Runtime Brokers send unsolicited events to the Hub.
 
 **Event Envelope:**
 ```json
@@ -1692,7 +1692,7 @@ Byte streams (PTY, logs, file transfer) are multiplexed over the control channel
 }
 ```
 
-The Hub maps incoming client WebSocket connections (e.g., `/agents/{id}/pty`) to stream IDs on the appropriate Runtime Host control channel.
+The Hub maps incoming client WebSocket connections (e.g., `/agents/{id}/pty`) to stream IDs on the appropriate Runtime Broker control channel.
 
 ### 11.7 Heartbeat & Reconnection
 
@@ -1716,7 +1716,7 @@ The Hub maps incoming client WebSocket connections (e.g., `/agents/{id}/pty`) to
 
 ### 11.8 Read-Only Mode
 
-In read-only mode, the Runtime Host:
+In read-only mode, the Runtime Broker:
 - Establishes control channel connection
 - Sends `agent_status` events for locally-managed agents
 - Ignores `create_agent`, `stop_agent`, `delete_agent` commands (returns error)
@@ -1726,23 +1726,23 @@ The Hub tracks these agents but cannot control their lifecycle.
 
 ### 11.9 Transport Selection
 
-The Hub supports two transport modes for communicating with Runtime Hosts:
+The Hub supports two transport modes for communicating with Runtime Brokers:
 
 1. **Control Channel (WebSocket)**: Host-initiated persistent connection. Used when hosts are behind NAT/firewalls.
-2. **Direct HTTP**: Hub calls Runtime Host API endpoints directly. Used when hosts have stable, reachable endpoints.
+2. **Direct HTTP**: Hub calls Runtime Broker API endpoints directly. Used when hosts have stable, reachable endpoints.
 
 **Selection Logic:**
 
-When the Hub needs to send a command to a Runtime Host:
+When the Hub needs to send a command to a Runtime Broker:
 1. If Host has an active control channel connection → use WebSocket
 2. If Host has a registered `endpoint` URL and `status == "online"` → attempt direct HTTP
 3. If neither available → return `502 runtime_error`
 
 **Endpoint Mapping:**
 
-Control channel commands map to Runtime Host API endpoints:
+Control channel commands map to Runtime Broker API endpoints:
 
-| Control Channel Command | Runtime Host Endpoint |
+| Control Channel Command | Runtime Broker Endpoint |
 |-------------------------|----------------------|
 | `create_agent` | `POST /api/v1/agents` |
 | `start_agent` | `POST /api/v1/agents/{id}/start` |
@@ -1751,7 +1751,7 @@ Control channel commands map to Runtime Host API endpoints:
 | `exec` | `POST /api/v1/agents/{id}/exec` |
 | `open_stream` | `GET /api/v1/agents/{id}/attach` (WebSocket) |
 
-See `runtime-host-api.md` for the complete Runtime Host API specification.
+See `runtime-broker-api.md` for the complete Runtime Broker API specification.
 
 ### 11.10 Command Timeouts
 
@@ -1873,7 +1873,7 @@ The current control channel uses WebSocket with a custom JSON-based protocol. A 
 
 ### 15.2 Message Queue-Based Command Delivery
 
-The current WebSocket control channel requires persistent connections between the Hub and Runtime Hosts. This creates challenges for horizontal scaling and reliability:
+The current WebSocket control channel requires persistent connections between the Hub and Runtime Brokers. This creates challenges for horizontal scaling and reliability:
 
 - Hub instances must maintain sticky sessions or share connection state
 - Network interruptions require reconnection and state reconciliation
@@ -1881,11 +1881,11 @@ The current WebSocket control channel requires persistent connections between th
 
 **Proposed Alternative: Database-Backed Command Queue**
 
-Instead of pushing commands over persistent WebSockets, the Hub writes commands to a database-backed queue, and Runtime Hosts poll for pending commands.
+Instead of pushing commands over persistent WebSockets, the Hub writes commands to a database-backed queue, and Runtime Brokers poll for pending commands.
 
 ```
 ┌─────────────────┐                    ┌─────────────────┐
-│   Scion Hub     │                    │  Runtime Host   │
+│   Scion Hub     │                    │  Runtime Broker   │
 │   (Stateless)   │                    │  (behind NAT)   │
 │                 │                    │                 │
 │  ┌───────────┐  │    Poll (HTTP)     │                 │
@@ -1914,12 +1914,12 @@ Instead of pushing commands over persistent WebSockets, the Hub writes commands 
 
 **Polling Endpoint:**
 ```
-GET /api/v1/runtime-hosts/{hostId}/commands?status=pending
+GET /api/v1/runtime-brokers/{hostId}/commands?status=pending
 ```
 
 **Acknowledgment Endpoint:**
 ```
-POST /api/v1/runtime-hosts/{hostId}/commands/{commandId}/ack
+POST /api/v1/runtime-brokers/{hostId}/commands/{commandId}/ack
 {
   "success": true,
   "result": { ... }
@@ -1941,7 +1941,7 @@ POST /api/v1/runtime-hosts/{hostId}/commands/{commandId}/ack
 Interactive streams (PTY, real-time logs) cannot use polling due to latency requirements. A hybrid approach would use:
 
 1. **Command queue for lifecycle operations**: `create_agent`, `stop_agent`, `delete_agent`, etc.
-2. **On-demand WebSocket for streams**: When PTY is needed, the queue delivers a `prepare_stream` command containing a unique stream token. The Runtime Host then initiates a short-lived WebSocket connection for that specific stream.
+2. **On-demand WebSocket for streams**: When PTY is needed, the queue delivers a `prepare_stream` command containing a unique stream token. The Runtime Broker then initiates a short-lived WebSocket connection for that specific stream.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -1965,8 +1965,8 @@ Interactive streams (PTY, real-time logs) cannot use polling due to latency requ
 **Stream Initiation Flow:**
 1. User requests PTY attachment via Hub API
 2. Hub writes `prepare_stream` command to queue with stream token
-3. Runtime Host polls, receives command, stores stream token
-4. Runtime Host connects to Hub WebSocket: `WS /api/v1/streams/{streamToken}`
+3. Runtime Broker polls, receives command, stores stream token
+4. Runtime Broker connects to Hub WebSocket: `WS /api/v1/streams/{streamToken}`
 5. Hub bridges the browser WebSocket to the Host WebSocket
 6. Stream closes when either side disconnects
 

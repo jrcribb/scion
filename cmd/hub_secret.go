@@ -31,10 +31,10 @@ They are injected into agents at runtime but never exposed via the API.
 Secrets can be scoped to:
   - User (default): Available to all your agents
   - Grove: Available to agents in a specific grove
-  - Host: Available to agents running on a specific host
+  - Broker: Available to agents running on a specific broker
 
 Secrets are resolved hierarchically when an agent starts:
-  user -> grove -> host -> agent config
+  user -> grove -> broker -> agent config
 
 Examples:
   # Set a user-scoped secret
@@ -62,13 +62,13 @@ var hubSecretSetCmd = &cobra.Command{
 The value is stored securely and can never be retrieved after creation.
 Only metadata (key, scope, creation time) can be viewed.
 
-By default, secrets are scoped to the current user. Use --grove or --host
+By default, secrets are scoped to the current user. Use --grove or --broker
 to set secrets at different scopes.
 
 Examples:
   scion hub secret set API_KEY sk-abc123
   scion hub secret set --grove DATABASE_PASSWORD mypassword
-  scion hub secret set --host SSH_PRIVATE_KEY "$(cat ~/.ssh/id_rsa)"`,
+  scion hub secret set --broker SSH_PRIVATE_KEY "$(cat ~/.ssh/id_rsa)"`,
 	Args: cobra.ExactArgs(2),
 	RunE: runSecretSet,
 }
@@ -103,7 +103,7 @@ var hubSecretClearCmd = &cobra.Command{
 Examples:
   scion hub secret clear API_KEY
   scion hub secret clear --grove API_KEY
-  scion hub secret clear --host API_KEY`,
+  scion hub secret clear --broker API_KEY`,
 	Args: cobra.ExactArgs(1),
 	RunE: runSecretClear,
 }
@@ -117,7 +117,7 @@ func init() {
 	// Add scope flags to all subcommands
 	for _, cmd := range []*cobra.Command{hubSecretSetCmd, hubSecretGetCmd, hubSecretClearCmd} {
 		cmd.Flags().StringVar(&secretGroveScope, "grove", "", "Grove scope (use flag without value to infer from current directory, or provide grove ID)")
-		cmd.Flags().StringVar(&secretBrokerScope, "broker", "", "Host scope (use flag without value to use current host, or provide host ID)")
+		cmd.Flags().StringVar(&secretBrokerScope, "broker", "", "Broker scope (use flag without value to use current broker, or provide broker ID)")
 	}
 
 	hubSecretGetCmd.Flags().BoolVar(&secretOutputJSON, "json", false, "Output in JSON format")
@@ -126,10 +126,10 @@ func init() {
 // resolveSecretScope determines the scope and scopeID based on flags
 func resolveSecretScope(cmd *cobra.Command, settings *config.Settings) (scope, scopeID string, err error) {
 	groveSet := cmd.Flags().Changed("grove")
-	brokerSet := cmd.Flags().Changed("host")
+	brokerSet := cmd.Flags().Changed("broker")
 
 	if groveSet && brokerSet {
-		return "", "", fmt.Errorf("cannot specify both --grove and --host")
+		return "", "", fmt.Errorf("cannot specify both --grove and --broker")
 	}
 
 	if groveSet {
@@ -156,7 +156,7 @@ func resolveSecretScope(cmd *cobra.Command, settings *config.Settings) (scope, s
 			if settings.Hub != nil && settings.Hub.BrokerID != "" {
 				scopeID = settings.Hub.BrokerID
 			} else {
-				return "", "", fmt.Errorf("cannot infer host ID: not registered with Hub. Use 'scion hub register' first or provide explicit host ID")
+				return "", "", fmt.Errorf("cannot infer broker ID: not registered with Hub. Use 'scion hub register' first or provide explicit broker ID")
 			}
 		}
 		return scope, scopeID, nil

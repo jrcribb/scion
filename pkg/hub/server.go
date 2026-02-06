@@ -65,7 +65,7 @@ type ServerConfig struct {
 	// AdminEmails is a list of email addresses that should be auto-promoted to admin role.
 	// Useful for bootstrapping the first admin user.
 	AdminEmails []string
-	// BrokerAuthConfig holds configuration for Runtime Host HMAC authentication.
+	// BrokerAuthConfig holds configuration for Runtime Broker HMAC authentication.
 	BrokerAuthConfig BrokerAuthConfig
 	// HubEndpoint is the public endpoint URL for this Hub (used in host join responses).
 	HubEndpoint string
@@ -93,62 +93,62 @@ func DefaultServerConfig() ServerConfig {
 	}
 }
 
-// AgentDispatcher is the interface for dispatching agent operations to a runtime host.
+// AgentDispatcher is the interface for dispatching agent operations to a runtime broker.
 // Implementations may be local (co-located hub+host) or remote (HTTP-based).
 type AgentDispatcher interface {
-	// DispatchAgentCreate creates and starts an agent on the runtime host.
+	// DispatchAgentCreate creates and starts an agent on the runtime broker.
 	// Returns the updated agent info after creation/start.
 	DispatchAgentCreate(ctx context.Context, agent *store.Agent) error
 
-	// DispatchAgentStart resumes a stopped agent on the runtime host.
+	// DispatchAgentStart resumes a stopped agent on the runtime broker.
 	DispatchAgentStart(ctx context.Context, agent *store.Agent) error
 
-	// DispatchAgentStop stops a running agent on the runtime host.
+	// DispatchAgentStop stops a running agent on the runtime broker.
 	DispatchAgentStop(ctx context.Context, agent *store.Agent) error
 
-	// DispatchAgentRestart restarts an agent on the runtime host.
+	// DispatchAgentRestart restarts an agent on the runtime broker.
 	DispatchAgentRestart(ctx context.Context, agent *store.Agent) error
 
-	// DispatchAgentDelete removes an agent from the runtime host.
+	// DispatchAgentDelete removes an agent from the runtime broker.
 	// deleteFiles indicates whether to delete workspace files.
 	// removeBranch indicates whether to remove the git branch.
 	DispatchAgentDelete(ctx context.Context, agent *store.Agent, deleteFiles, removeBranch bool) error
 
-	// DispatchAgentMessage sends a message to an agent on the runtime host.
+	// DispatchAgentMessage sends a message to an agent on the runtime broker.
 	DispatchAgentMessage(ctx context.Context, agent *store.Agent, message string, interrupt bool) error
 }
 
-// RuntimeBrokerClient is an interface for communicating with runtime hosts over HTTP.
-// This allows the hub to dispatch operations to remote runtime hosts.
+// RuntimeBrokerClient is an interface for communicating with runtime brokers over HTTP.
+// This allows the hub to dispatch operations to remote runtime brokers.
 // All methods take a brokerID parameter which is used for HMAC authentication when
 // the client supports it (AuthenticatedHostClient).
 type RuntimeBrokerClient interface {
-	// CreateAgent creates an agent on a remote runtime host.
+	// CreateAgent creates an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
 	CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error)
 
-	// StartAgent starts an agent on a remote runtime host.
+	// StartAgent starts an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
 	StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error
 
-	// StopAgent stops an agent on a remote runtime host.
+	// StopAgent stops an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
 	StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error
 
-	// RestartAgent restarts an agent on a remote runtime host.
+	// RestartAgent restarts an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
 	RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error
 
-	// DeleteAgent deletes an agent from a remote runtime host.
+	// DeleteAgent deletes an agent from a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
 	DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error
 
-	// MessageAgent sends a message to an agent on a remote runtime host.
+	// MessageAgent sends a message to an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
 	MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error
 }
 
-// RemoteCreateAgentRequest is the request body for creating an agent on a remote runtime host.
+// RemoteCreateAgentRequest is the request body for creating an agent on a remote runtime broker.
 type RemoteCreateAgentRequest struct {
 	RequestID   string             `json:"requestId,omitempty"`
 	AgentID     string             `json:"agentId"`
@@ -159,7 +159,7 @@ type RemoteCreateAgentRequest struct {
 	ResolvedEnv map[string]string  `json:"resolvedEnv,omitempty"`
 	HubEndpoint string             `json:"hubEndpoint,omitempty"`
 	AgentToken  string             `json:"agentToken,omitempty"`
-	// GrovePath is the local filesystem path to the grove on the target runtime host.
+	// GrovePath is the local filesystem path to the grove on the target runtime broker.
 	// This is looked up from the grove contributor record for the target host.
 	GrovePath string `json:"grovePath,omitempty"`
 }
@@ -174,8 +174,8 @@ type RemoteAgentConfig struct {
 	Task        string   `json:"task,omitempty"`
 	CommandArgs []string `json:"commandArgs,omitempty"`
 
-	// TemplateID is the Hub template ID for cache lookup on the Runtime Host.
-	// When provided, the Runtime Host can use this to fetch the template
+	// TemplateID is the Hub template ID for cache lookup on the Runtime Broker.
+	// When provided, the Runtime Broker can use this to fetch the template
 	// from the Hub and cache it locally.
 	TemplateID string `json:"templateId,omitempty"`
 
@@ -184,13 +184,13 @@ type RemoteAgentConfig struct {
 	TemplateHash string `json:"templateHash,omitempty"`
 }
 
-// RemoteAgentResponse is the response from creating an agent on a remote runtime host.
+// RemoteAgentResponse is the response from creating an agent on a remote runtime broker.
 type RemoteAgentResponse struct {
 	Agent   *RemoteAgentInfo `json:"agent,omitempty"`
 	Created bool             `json:"created"`
 }
 
-// RemoteAgentInfo contains agent information from a remote runtime host.
+// RemoteAgentInfo contains agent information from a remote runtime broker.
 type RemoteAgentInfo struct {
 	ID              string `json:"id"`
 	AgentID         string `json:"agentId"`
@@ -207,7 +207,7 @@ type Server struct {
 	mux               *http.ServeMux
 	mu                sync.RWMutex
 	startTime         time.Time
-	dispatcher        AgentDispatcher     // Optional dispatcher for co-located runtime host
+	dispatcher        AgentDispatcher     // Optional dispatcher for co-located runtime broker
 	storage           storage.Storage     // Optional storage backend for templates
 	agentTokenService *AgentTokenService  // Agent JWT token service
 	userTokenService  *UserTokenService   // User JWT token service
@@ -217,7 +217,7 @@ type Server struct {
 	brokerAuthService   *BrokerAuthService    // Host HMAC authentication service
 	auditLogger       AuditLogger         // Audit logger for security events
 	metrics           MetricsRecorder     // Metrics recorder for host auth
-	controlChannel    *ControlChannelManager // WebSocket control channel for runtime hosts
+	controlChannel    *ControlChannelManager // WebSocket control channel for runtime brokers
 }
 
 // New creates a new Hub API server.
@@ -358,7 +358,7 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 	return newKey, nil
 }
 
-// SetDispatcher sets the agent dispatcher for co-located runtime host operations.
+// SetDispatcher sets the agent dispatcher for co-located runtime broker operations.
 func (s *Server) SetDispatcher(d AgentDispatcher) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -450,7 +450,7 @@ func (s *Server) GetControlChannelManager() *ControlChannelManager {
 }
 
 // CreateAuthenticatedDispatcher creates an HTTPAgentDispatcher with authenticated
-// host communication. This dispatcher signs outgoing requests to Runtime Hosts
+// host communication. This dispatcher signs outgoing requests to Runtime Brokers
 // using HMAC authentication based on shared secrets stored in the database.
 // It also supports control channel fallback for NAT traversal.
 func (s *Server) CreateAuthenticatedDispatcher() *HTTPAgentDispatcher {
@@ -617,12 +617,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v1/policies", s.handlePolicies)
 	s.mux.HandleFunc("/api/v1/policies/", s.handlePolicyRoutes)
 
-	// Host registration endpoints (Runtime Host HMAC authentication)
+	// Host registration endpoints (Runtime Broker HMAC authentication)
 	s.mux.HandleFunc("/api/v1/brokers", s.handleBrokersEndpoint)
 	s.mux.HandleFunc("/api/v1/brokers/join", s.handleBrokerJoin)
 	s.mux.HandleFunc("/api/v1/brokers/", s.handleBrokerByIDRoutes)
 
-	// WebSocket control channel endpoint for Runtime Hosts
+	// WebSocket control channel endpoint for Runtime Brokers
 	s.mux.HandleFunc("/api/v1/runtime-brokers/connect", s.handleRuntimeHostConnect)
 }
 
@@ -632,7 +632,7 @@ func (s *Server) applyMiddleware(h http.Handler) http.Handler {
 	h = s.recoveryMiddleware(h)
 	h = s.loggingMiddleware(h)
 
-	// Apply host auth middleware (checks X-Scion-Broker-ID header for HMAC auth)
+	// Apply broker auth middleware (checks X-Scion-Broker-ID header for HMAC auth)
 	// This runs after unified auth but before the handler, allowing hosts to authenticate
 	if s.brokerAuthService != nil {
 		if s.auditLogger != nil {
@@ -842,7 +842,7 @@ func extractAction(r *http.Request, prefix string) (id, action string) {
 	return
 }
 
-// handleRuntimeHostConnect handles WebSocket upgrade for Runtime Host control channel.
+// handleRuntimeHostConnect handles WebSocket upgrade for Runtime Broker control channel.
 func (s *Server) handleRuntimeHostConnect(w http.ResponseWriter, r *http.Request) {
 	// Verify this is a WebSocket upgrade request
 	if !isWebSocketUpgrade(r) {
@@ -856,13 +856,13 @@ func (s *Server) handleRuntimeHostConnect(w http.ResponseWriter, r *http.Request
 		// Try to get host ID from header if not authenticated yet
 		brokerID := r.Header.Get("X-Scion-Broker-ID")
 		if brokerID == "" {
-			writeError(w, 401, ErrCodeUnauthorized, "Host authentication required", nil)
+			writeError(w, 401, ErrCodeUnauthorized, "Broker authentication required", nil)
 			return
 		}
 
 		// Validate host exists and is authorized
 		if s.brokerAuthService == nil {
-			writeError(w, 401, ErrCodeUnauthorized, "Host authentication not enabled", nil)
+			writeError(w, 401, ErrCodeUnauthorized, "Broker authentication not enabled", nil)
 			return
 		}
 
@@ -870,7 +870,7 @@ func (s *Server) handleRuntimeHostConnect(w http.ResponseWriter, r *http.Request
 		_, err := s.brokerAuthService.ValidateHostSignature(r.Context(), r)
 		if err != nil {
 			slog.Error("HMAC validation failed for host", "brokerID", brokerID, "error", err)
-			writeError(w, 401, ErrCodeHostAuthFailed, "Invalid host signature", nil)
+			writeError(w, 401, ErrCodeBrokerAuthFailed, "Invalid broker signature", nil)
 			return
 		}
 

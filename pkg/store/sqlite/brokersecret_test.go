@@ -15,7 +15,7 @@ func TestBrokerSecretCRUD(t *testing.T) {
 	s := setupTestStore(t)
 	ctx := context.Background()
 
-	// First create a runtime host to satisfy FK constraint
+	// First create a runtime broker to satisfy FK constraint
 	brokerID := uuid.New().String()
 	broker := &store.RuntimeBroker{
 		ID:      brokerID,
@@ -27,7 +27,7 @@ func TestBrokerSecretCRUD(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	// Test CreateBrokerSecret
@@ -52,7 +52,7 @@ func TestBrokerSecretCRUD(t *testing.T) {
 		t.Fatalf("GetBrokerSecret failed: %v", err)
 	}
 	if retrieved.BrokerID != brokerID {
-		t.Errorf("HostID mismatch: got %s, want %s", retrieved.BrokerID, brokerID)
+		t.Errorf("BrokerID mismatch: got %s, want %s", retrieved.BrokerID, brokerID)
 	}
 	if string(retrieved.SecretKey) != string(secret.SecretKey) {
 		t.Error("SecretKey mismatch")
@@ -133,7 +133,7 @@ func TestBrokerJoinTokenCRUD(t *testing.T) {
 	s := setupTestStore(t)
 	ctx := context.Background()
 
-	// First create a runtime host to satisfy FK constraint
+	// First create a runtime broker to satisfy FK constraint
 	brokerID := uuid.New().String()
 	broker := &store.RuntimeBroker{
 		ID:      brokerID,
@@ -145,7 +145,7 @@ func TestBrokerJoinTokenCRUD(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	// Test CreateJoinToken
@@ -170,7 +170,7 @@ func TestBrokerJoinTokenCRUD(t *testing.T) {
 		t.Fatalf("GetJoinToken failed: %v", err)
 	}
 	if retrieved.BrokerID != brokerID {
-		t.Errorf("HostID mismatch: got %s, want %s", retrieved.BrokerID, brokerID)
+		t.Errorf("BrokerID mismatch: got %s, want %s", retrieved.BrokerID, brokerID)
 	}
 	if retrieved.TokenHash != "test-token-hash-abc123" {
 		t.Errorf("TokenHash mismatch: got %s, want %s", retrieved.TokenHash, "test-token-hash-abc123")
@@ -228,7 +228,7 @@ func TestCleanExpiredJoinTokens(t *testing.T) {
 			Updated: time.Now(),
 		}
 		if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-			t.Fatalf("failed to create runtime host: %v", err)
+			t.Fatalf("failed to create runtime broker: %v", err)
 		}
 	}
 
@@ -275,7 +275,7 @@ func TestBrokerSecretCascadeDelete(t *testing.T) {
 	s := setupTestStore(t)
 	ctx := context.Background()
 
-	// Create a runtime host
+	// Create a runtime broker
 	brokerID := uuid.New().String()
 	broker := &store.RuntimeBroker{
 		ID:      brokerID,
@@ -287,7 +287,7 @@ func TestBrokerSecretCascadeDelete(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	// Create a secret for the host
@@ -307,7 +307,7 @@ func TestBrokerSecretCascadeDelete(t *testing.T) {
 		t.Fatalf("GetBrokerSecret failed: %v", err)
 	}
 
-	// Delete the runtime host
+	// Delete the runtime broker
 	if err := s.DeleteRuntimeBroker(ctx, brokerID); err != nil {
 		t.Fatalf("DeleteRuntimeBroker failed: %v", err)
 	}

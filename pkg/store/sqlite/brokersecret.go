@@ -15,7 +15,7 @@ import (
 // Host Secret Operations
 // ============================================================================
 
-// CreateBrokerSecret creates a new host secret record.
+// CreateBrokerSecret creates a new broker secret record.
 func (s *SQLiteStore) CreateBrokerSecret(ctx context.Context, secret *store.BrokerSecret) error {
 	if secret.BrokerID == "" {
 		return store.ErrInvalidInput
@@ -51,7 +51,7 @@ func (s *SQLiteStore) CreateBrokerSecret(ctx context.Context, secret *store.Brok
 	return nil
 }
 
-// GetBrokerSecret retrieves a host secret by host ID.
+// GetBrokerSecret retrieves a broker secret by host ID.
 func (s *SQLiteStore) GetBrokerSecret(ctx context.Context, brokerID string) (*store.BrokerSecret, error) {
 	secret := &store.BrokerSecret{}
 	var rotatedAt, expiresAt sql.NullTime
@@ -125,7 +125,7 @@ func (s *SQLiteStore) GetActiveSecrets(ctx context.Context, brokerID string) ([]
 	return secrets, nil
 }
 
-// UpdateBrokerSecret updates an existing host secret.
+// UpdateBrokerSecret updates an existing broker secret.
 func (s *SQLiteStore) UpdateBrokerSecret(ctx context.Context, secret *store.BrokerSecret) error {
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE broker_secrets SET
@@ -154,7 +154,7 @@ func (s *SQLiteStore) UpdateBrokerSecret(ctx context.Context, secret *store.Brok
 	return nil
 }
 
-// DeleteBrokerSecret removes a host secret.
+// DeleteBrokerSecret removes a broker secret.
 func (s *SQLiteStore) DeleteBrokerSecret(ctx context.Context, brokerID string) error {
 	result, err := s.db.ExecContext(ctx, `
 		DELETE FROM broker_secrets WHERE broker_id = ?

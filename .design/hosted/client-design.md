@@ -5,10 +5,10 @@
 
 ## 1. Overview
 
-This document specifies the design for Go client libraries that provide programmatic access to both the **Hub API** and **Runtime Host API**. These clients will be used:
+This document specifies the design for Go client libraries that provide programmatic access to both the **Hub API** and **Runtime Broker API**. These clients will be used:
 
 1. **In the CLI** to interact with the Hub for hosted mode operations
-2. **Within the Hub** to communicate with remote Runtime Hosts (Direct HTTP mode)
+2. **Within the Hub** to communicate with remote Runtime Brokers (Direct HTTP mode)
 3. **By external consumers** who want to build integrations with the Scion hosted platform
 
 Since external use is a design goal, these clients are implemented as public packages with stable, documented interfaces.
@@ -31,7 +31,7 @@ pkg/
 │   ├── options.go          # Client configuration options
 │   ├── agents.go           # Agent operations
 │   ├── groves.go           # Grove operations
-│   ├── runtime_hosts.go    # Runtime host operations
+│   ├── runtime_brokers.go    # Runtime host operations
 │   ├── templates.go        # Template operations
 │   ├── users.go            # User operations
 │   ├── auth.go             # Authentication helpers
@@ -39,7 +39,7 @@ pkg/
 │   ├── types.go            # Client-specific types
 │   └── client_test.go      # Tests
 │
-├── hostclient/             # Runtime Host API client
+├── brokerclient/             # Runtime Broker API client
 │   ├── client.go           # Client implementation
 │   ├── options.go          # Client configuration options
 │   ├── agents.go           # Agent operations
@@ -59,7 +59,7 @@ pkg/
 
 ## 2. Shared Client Infrastructure (`pkg/apiclient`)
 
-Common utilities used by both Hub and Runtime Host clients.
+Common utilities used by both Hub and Runtime Broker clients.
 
 ### 2.1. Transport Layer
 
@@ -170,7 +170,7 @@ func (a *APIKeyAuth) ApplyAuth(req *http.Request) error {
 
 func (a *APIKeyAuth) Refresh() (bool, error) { return false, nil }
 
-// HostTokenAuth implements Runtime Host token authentication.
+// HostTokenAuth implements Runtime Broker token authentication.
 type HostTokenAuth struct {
     Token string
 }
@@ -317,8 +317,8 @@ type Client interface {
     // Groves returns the grove operations interface.
     Groves() GroveService
 
-    // RuntimeHosts returns the runtime host operations interface.
-    RuntimeHosts() RuntimeHostService
+    // RuntimeBrokers returns the runtime broker operations interface.
+    RuntimeBrokers() RuntimeBrokerService
 
     // Templates returns the template operations interface.
     Templates() TemplateService
@@ -346,7 +346,7 @@ type client struct {
 
     agents       *agentService
     groves       *groveService
-    runtimeHosts *runtimeHostService
+    runtimeBrokers *runtimeBrokerService
     templates    *templateService
     users        *userService
     authService  *authService
@@ -365,7 +365,7 @@ func New(baseURL string, opts ...Option) (Client, error) {
     // Initialize service implementations
     c.agents = &agentService{c: c}
     c.groves = &groveService{c: c}
-    c.runtimeHosts = &runtimeHostService{c: c}
+    c.runtimeBrokers = &runtimeBrokerService{c: c}
     c.templates = &templateService{c: c}
     c.users = &userService{c: c}
     c.authService = &authService{c: c}
@@ -484,7 +484,7 @@ type AgentService interface {
 type ListAgentsOptions struct {
     GroveID       string            // Filter by grove
     Status        string            // Filter by status
-    RuntimeHostID string            // Filter by runtime host
+    RuntimeBrokerID string            // Filter by runtime broker
     Labels        map[string]string // Label selector
     Page          apiclient.PageOptions
 }
@@ -500,7 +500,7 @@ type CreateAgentRequest struct {
     Name          string            `json:"name"`
     GroveID       string            `json:"groveId"`
     Template      string            `json:"template,omitempty"`
-    RuntimeHostID string            `json:"runtimeHostId,omitempty"`
+    RuntimeBrokerID string            `json:"runtimeBrokerId,omitempty"`
     Task          string            `json:"task,omitempty"`
     Branch        string            `json:"branch,omitempty"`
     Workspace     string            `json:"workspace,omitempty"`
@@ -578,7 +578,7 @@ type GroveService interface {
     // ListAgents returns agents in a grove.
     ListAgents(ctx context.Context, groveID string, opts *ListAgentsOptions) (*ListAgentsResponse, error)
 
-    // ListContributors returns runtime hosts contributing to a grove.
+    // ListContributors returns runtime brokers contributing to a grove.
     ListContributors(ctx context.Context, groveID string) (*ListContributorsResponse, error)
 
     // RemoveContributor removes a host from a grove.
@@ -630,7 +630,7 @@ type HostInfo struct {
 // RegisterGroveResponse is the response from registering a grove.
 type RegisterGroveResponse struct {
     Grove     *Grove        `json:"grove"`
-    Host      *RuntimeHost  `json:"host"`
+    Host      *RuntimeBroker  `json:"host"`
     Created   bool          `json:"created"` // True if grove was newly created
     HostToken string        `json:"hostToken"`
 }
@@ -657,7 +657,7 @@ type ListContributorsResponse struct {
 }
 ```
 
-### 3.5. Runtime Host Service
+### 3.5. Runtime Broker Service
 
 ```go
 package hubclient
@@ -668,16 +668,16 @@ import (
     "github.com/ptone/scion-agent/pkg/apiclient"
 )
 
-// RuntimeHostService handles runtime host operations.
-type RuntimeHostService interface {
-    // List returns runtime hosts matching the filter criteria.
+// RuntimeBrokerService handles runtime broker operations.
+type RuntimeBrokerService interface {
+    // List returns runtime brokers matching the filter criteria.
     List(ctx context.Context, opts *ListHostsOptions) (*ListHostsResponse, error)
 
-    // Get returns a single runtime host by ID.
-    Get(ctx context.Context, hostID string) (*RuntimeHost, error)
+    // Get returns a single runtime broker by ID.
+    Get(ctx context.Context, hostID string) (*RuntimeBroker, error)
 
     // Update updates host metadata.
-    Update(ctx context.Context, hostID string, req *UpdateHostRequest) (*RuntimeHost, error)
+    Update(ctx context.Context, hostID string, req *UpdateHostRequest) (*RuntimeBroker, error)
 
     // Delete removes a host from all groves.
     Delete(ctx context.Context, hostID string) error
@@ -689,7 +689,7 @@ type RuntimeHostService interface {
     Heartbeat(ctx context.Context, hostID string, status *HostHeartbeat) error
 }
 
-// ListHostsOptions configures runtime host list filtering.
+// ListHostsOptions configures runtime broker list filtering.
 type ListHostsOptions struct {
     Type    string // Filter by type (docker, kubernetes, apple)
     Status  string // Filter by status (online, offline)
@@ -698,13 +698,13 @@ type ListHostsOptions struct {
     Page    apiclient.PageOptions
 }
 
-// ListHostsResponse is the response from listing runtime hosts.
+// ListHostsResponse is the response from listing runtime brokers.
 type ListHostsResponse struct {
-    Hosts []RuntimeHost
+    Hosts []RuntimeBroker
     Page  apiclient.PageResult
 }
 
-// UpdateHostRequest is the request for updating a runtime host.
+// UpdateHostRequest is the request for updating a runtime broker.
 type UpdateHostRequest struct {
     Name        string            `json:"name,omitempty"`
     Labels      map[string]string `json:"labels,omitempty"`
@@ -883,8 +883,8 @@ type EnvService interface {
 
 // ListEnvOptions configures environment variable listing.
 type ListEnvOptions struct {
-    Scope   string // user, grove, runtime_host (default: user)
-    ScopeID string // ID of the scoped entity (required for grove/runtime_host)
+    Scope   string // user, grove, runtime_broker (default: user)
+    ScopeID string // ID of the scoped entity (required for grove/runtime_broker)
     Key     string // Optional: filter by specific key
 }
 
@@ -897,15 +897,15 @@ type ListEnvResponse struct {
 
 // EnvScopeOptions specifies the scope for get/delete operations.
 type EnvScopeOptions struct {
-    Scope   string // user, grove, runtime_host (default: user)
-    ScopeID string // ID of the scoped entity (required for grove/runtime_host)
+    Scope   string // user, grove, runtime_broker (default: user)
+    ScopeID string // ID of the scoped entity (required for grove/runtime_broker)
 }
 
 // SetEnvRequest is the request for setting an environment variable.
 type SetEnvRequest struct {
     Value       string `json:"value"`                 // Required: variable value
     Scope       string `json:"scope,omitempty"`       // Scope type (default: user)
-    ScopeID     string `json:"scopeId,omitempty"`     // Required for grove/runtime_host scope
+    ScopeID     string `json:"scopeId,omitempty"`     // Required for grove/runtime_broker scope
     Description string `json:"description,omitempty"` // Optional description
     Sensitive   bool   `json:"sensitive,omitempty"`   // Mask value in responses
 }
@@ -961,8 +961,8 @@ type SecretService interface {
 
 // ListSecretOptions configures secret listing.
 type ListSecretOptions struct {
-    Scope   string // user, grove, runtime_host (default: user)
-    ScopeID string // ID of the scoped entity (required for grove/runtime_host)
+    Scope   string // user, grove, runtime_broker (default: user)
+    ScopeID string // ID of the scoped entity (required for grove/runtime_broker)
 }
 
 // ListSecretResponse is the response from listing secrets.
@@ -974,15 +974,15 @@ type ListSecretResponse struct {
 
 // SecretScopeOptions specifies the scope for get/delete operations.
 type SecretScopeOptions struct {
-    Scope   string // user, grove, runtime_host (default: user)
-    ScopeID string // ID of the scoped entity (required for grove/runtime_host)
+    Scope   string // user, grove, runtime_broker (default: user)
+    ScopeID string // ID of the scoped entity (required for grove/runtime_broker)
 }
 
 // SetSecretRequest is the request for setting a secret.
 type SetSecretRequest struct {
     Value       string `json:"value"`                 // Required: secret value (write-only)
     Scope       string `json:"scope,omitempty"`       // Scope type (default: user)
-    ScopeID     string `json:"scopeId,omitempty"`     // Required for grove/runtime_host scope
+    ScopeID     string `json:"scopeId,omitempty"`     // Required for grove/runtime_broker scope
     Description string `json:"description,omitempty"` // Optional description
 }
 
@@ -1085,8 +1085,8 @@ type Agent struct {
     Image           string            `json:"image,omitempty"`
     Detached        bool              `json:"detached,omitempty"`
     Runtime         string            `json:"runtime,omitempty"`
-    RuntimeHostID   string            `json:"runtimeHostId,omitempty"`
-    RuntimeHostType string            `json:"runtimeHostType,omitempty"`
+    RuntimeBrokerID   string            `json:"runtimeBrokerId,omitempty"`
+    RuntimeBrokerType string            `json:"runtimeBrokerType,omitempty"`
     WebPTYEnabled   bool              `json:"webPtyEnabled,omitempty"`
     TaskSummary     string            `json:"taskSummary,omitempty"`
     AppliedConfig   *AgentConfig      `json:"appliedConfig,omitempty"`
@@ -1171,8 +1171,8 @@ type BucketConfig struct {
     Prefix   string `json:"prefix,omitempty"`
 }
 
-// RuntimeHost represents a runtime host from the Hub API.
-type RuntimeHost struct {
+// RuntimeBroker represents a runtime broker from the Hub API.
+type RuntimeBroker struct {
     ID                 string            `json:"id"`
     Name               string            `json:"name"`
     Slug               string            `json:"slug"`
@@ -1194,7 +1194,7 @@ type RuntimeHost struct {
     Updated            time.Time         `json:"updated"`
 }
 
-// HostCapabilities describes runtime host capabilities.
+// HostCapabilities describes runtime broker capabilities.
 type HostCapabilities struct {
     WebPTY bool `json:"webPty"`
     Sync   bool `json:"sync"`
@@ -1275,30 +1275,30 @@ type HealthResponse struct {
 
 ---
 
-## 4. Runtime Host API Client (`pkg/hostclient`)
+## 4. Runtime Broker API Client (`pkg/brokerclient`)
 
 ### 4.1. Client Interface and Implementation
 
 ```go
-package hostclient
+package brokerclient
 
 import (
     "context"
 
     "github.com/ptone/scion-agent/pkg/apiclient"
-    "github.com/ptone/scion-agent/pkg/runtimehost"
+    "github.com/ptone/scion-agent/pkg/runtimebroker"
 )
 
-// Client is the interface for the Runtime Host API client.
+// Client is the interface for the Runtime Broker API client.
 type Client interface {
     // Agents returns the agent operations interface.
     Agents() AgentService
 
     // Info returns host information.
-    Info(ctx context.Context) (*runtimehost.HostInfoResponse, error)
+    Info(ctx context.Context) (*runtimebroker.HostInfoResponse, error)
 
     // Health checks host availability.
-    Health(ctx context.Context) (*runtimehost.HealthResponse, error)
+    Health(ctx context.Context) (*runtimebroker.HealthResponse, error)
 }
 
 // client is the concrete implementation of Client.
@@ -1308,7 +1308,7 @@ type client struct {
     agents    *agentService
 }
 
-// New creates a new Runtime Host API client.
+// New creates a new Runtime Broker API client.
 func New(baseURL string, opts ...Option) (Client, error) {
     c := &client{
         transport: apiclient.NewTransport(baseURL),
@@ -1327,7 +1327,7 @@ func New(baseURL string, opts ...Option) (Client, error) {
 ### 4.2. Client Options
 
 ```go
-package hostclient
+package brokerclient
 
 import (
     "net/http"
@@ -1336,7 +1336,7 @@ import (
     "github.com/ptone/scion-agent/pkg/apiclient"
 )
 
-// Option configures a Runtime Host client.
+// Option configures a Runtime Broker client.
 type Option func(*client)
 
 // WithBearerToken sets Bearer token authentication.
@@ -1346,7 +1346,7 @@ func WithBearerToken(token string) Option {
     }
 }
 
-// WithHostToken sets Runtime Host token authentication.
+// WithHostToken sets Runtime Broker token authentication.
 func WithHostToken(token string) Option {
     return func(c *client) {
         c.auth = &apiclient.HostTokenAuth{Token: token}
@@ -1379,25 +1379,25 @@ func WithRetry(maxRetries int, wait time.Duration) Option {
 ### 4.3. Agent Service
 
 ```go
-package hostclient
+package brokerclient
 
 import (
     "context"
 
     "github.com/ptone/scion-agent/pkg/apiclient"
-    "github.com/ptone/scion-agent/pkg/runtimehost"
+    "github.com/ptone/scion-agent/pkg/runtimebroker"
 )
 
-// AgentService handles agent operations on a runtime host.
+// AgentService handles agent operations on a runtime broker.
 type AgentService interface {
     // List returns agents on this host.
-    List(ctx context.Context, opts *ListAgentsOptions) (*runtimehost.ListAgentsResponse, error)
+    List(ctx context.Context, opts *ListAgentsOptions) (*runtimebroker.ListAgentsResponse, error)
 
     // Get returns a single agent by ID.
-    Get(ctx context.Context, agentID string) (*runtimehost.AgentResponse, error)
+    Get(ctx context.Context, agentID string) (*runtimebroker.AgentResponse, error)
 
     // Create creates and starts a new agent.
-    Create(ctx context.Context, req *runtimehost.CreateAgentRequest) (*runtimehost.CreateAgentResponse, error)
+    Create(ctx context.Context, req *runtimebroker.CreateAgentRequest) (*runtimebroker.CreateAgentResponse, error)
 
     // Start starts a stopped agent.
     Start(ctx context.Context, agentID string) error
@@ -1415,13 +1415,13 @@ type AgentService interface {
     SendMessage(ctx context.Context, agentID string, message string, interrupt bool) error
 
     // Exec executes a command in an agent container.
-    Exec(ctx context.Context, agentID string, command []string, timeout int) (*runtimehost.ExecResponse, error)
+    Exec(ctx context.Context, agentID string, command []string, timeout int) (*runtimebroker.ExecResponse, error)
 
     // GetLogs retrieves agent logs.
     GetLogs(ctx context.Context, agentID string, opts *GetLogsOptions) (string, error)
 
     // GetStats retrieves agent resource statistics.
-    GetStats(ctx context.Context, agentID string) (*runtimehost.StatsResponse, error)
+    GetStats(ctx context.Context, agentID string) (*runtimebroker.StatsResponse, error)
 
     // Attach returns a PTY attachment for the agent.
     // The caller is responsible for closing the returned AttachSession.
@@ -1460,7 +1460,7 @@ type AttachOptions struct {
 ### 4.4. PTY Attachment
 
 ```go
-package hostclient
+package brokerclient
 
 import (
     "context"
@@ -1553,7 +1553,7 @@ func example(ctx context.Context, client hubclient.Client) {
 }
 ```
 
-### 5.2. Handling Runtime Host Errors
+### 5.2. Handling Runtime Broker Errors
 
 ```go
 func createAgentWithFallback(ctx context.Context, client hubclient.Client, req *hubclient.CreateAgentRequest) (*hubclient.Agent, error) {
@@ -1561,8 +1561,8 @@ func createAgentWithFallback(ctx context.Context, client hubclient.Client, req *
     if err != nil {
         var apiErr *apiclient.APIError
         if errors.As(err, &apiErr) {
-            // Check if it's a "no runtime host" error
-            if apiErr.Code == "no_runtime_host" || apiErr.Code == "runtime_host_unavailable" {
+            // Check if it's a "no runtime broker" error
+            if apiErr.Code == "no_runtime_broker" || apiErr.Code == "runtime_broker_unavailable" {
                 // Extract available hosts from error details
                 if hosts, ok := apiErr.Details["availableHosts"].([]interface{}); ok {
                     fmt.Println("Available hosts:")
@@ -1704,7 +1704,7 @@ func main() {
 }
 ```
 
-### 6.3. Runtime Host Client - Hub Dispatching to Host
+### 6.3. Runtime Broker Client - Hub Dispatching to Host
 
 ```go
 package main
@@ -1714,16 +1714,16 @@ import (
     "fmt"
     "log"
 
-    "github.com/ptone/scion-agent/pkg/hostclient"
-    "github.com/ptone/scion-agent/pkg/runtimehost"
+    "github.com/ptone/scion-agent/pkg/brokerclient"
+    "github.com/ptone/scion-agent/pkg/runtimebroker"
 )
 
 // This example shows how the Hub would dispatch an agent creation
-// to a Runtime Host in Direct HTTP mode.
-func dispatchAgentCreate(ctx context.Context, hostEndpoint, hostToken string, req *runtimehost.CreateAgentRequest) error {
-    client, err := hostclient.New(
+// to a Runtime Broker in Direct HTTP mode.
+func dispatchAgentCreate(ctx context.Context, hostEndpoint, hostToken string, req *runtimebroker.CreateAgentRequest) error {
+    client, err := brokerclient.New(
         hostEndpoint,
-        hostclient.WithBearerToken(hostToken),
+        brokerclient.WithBearerToken(hostToken),
     )
     if err != nil {
         return err
@@ -1742,7 +1742,7 @@ func dispatchAgentCreate(ctx context.Context, hostEndpoint, hostToken string, re
 }
 ```
 
-### 6.4. Runtime Host Client - PTY Attachment
+### 6.4. Runtime Broker Client - PTY Attachment
 
 ```go
 package main
@@ -1756,7 +1756,7 @@ import (
     "os/signal"
     "syscall"
 
-    "github.com/ptone/scion-agent/pkg/hostclient"
+    "github.com/ptone/scion-agent/pkg/brokerclient"
     "golang.org/x/term"
 )
 
@@ -1764,9 +1764,9 @@ func main() {
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    client, err := hostclient.New(
+    client, err := brokerclient.New(
         "https://host.scion.dev:9800",
-        hostclient.WithBearerToken("host-token"),
+        brokerclient.WithBearerToken("host-token"),
     )
     if err != nil {
         log.Fatal(err)
@@ -1776,7 +1776,7 @@ func main() {
     cols, rows, _ := term.GetSize(int(os.Stdin.Fd()))
 
     // Attach to agent PTY
-    session, err := client.Agents().Attach(ctx, "my-agent", &hostclient.AttachOptions{
+    session, err := client.Agents().Attach(ctx, "my-agent", &brokerclient.AttachOptions{
         Cols: cols,
         Rows: rows,
     })
@@ -1965,17 +1965,17 @@ func TestGetAgent(t *testing.T) {
 ### Phase 2: Hub Client
 1. Implement `pkg/hubclient` with all service interfaces
 2. Start with Agent and Grove services (most critical for CLI)
-3. Add RuntimeHost, Template, and User services
+3. Add RuntimeBroker, Template, and User services
 4. Add comprehensive tests
 
-### Phase 3: Runtime Host Client
-1. Implement `pkg/hostclient` with agent operations
+### Phase 3: Runtime Broker Client
+1. Implement `pkg/brokerclient` with agent operations
 2. Implement WebSocket-based PTY attachment
 3. Add tests
 
 ### Phase 4: Integration
 1. Integrate Hub client into CLI for hosted mode
-2. Integrate Runtime Host client into Hub for Direct HTTP dispatch
+2. Integrate Runtime Broker client into Hub for Direct HTTP dispatch
 3. End-to-end testing
 
 ---
@@ -1983,6 +1983,6 @@ func TestGetAgent(t *testing.T) {
 ## 9. References
 
 - **Hub API Specification:** `.design/hosted/hub-api.md`
-- **Runtime Host API Specification:** `.design/hosted/runtime-host-api.md`
+- **Runtime Broker API Specification:** `.design/hosted/runtime-broker-api.md`
 - **Architecture Overview:** `.design/hosted/hosted-architecture.md`
 - **Server Implementation:** `.design/hosted/server-implementation-design.md`

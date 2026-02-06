@@ -182,7 +182,7 @@ func promptHubRegistration(isGlobal bool) error {
 			brokerName = "local-host"
 		}
 
-		// Get existing host ID if available
+		// Get existing broker ID if available
 		var existingBrokerID string
 		if settings.Hub != nil {
 			existingBrokerID = settings.Hub.BrokerID
@@ -195,7 +195,7 @@ func promptHubRegistration(isGlobal bool) error {
 			GitRemote: util.NormalizeGitRemote(gitRemote),
 			Path:      resolvedPath,
 			Mode:      "connected",
-			Host: &hubclient.HostInfo{
+			Broker: &hubclient.BrokerInfo{
 				ID:   existingBrokerID,
 				Name: brokerName,
 			},
@@ -209,8 +209,8 @@ func promptHubRegistration(isGlobal bool) error {
 			return fmt.Errorf("registration failed: %w", err)
 		}
 
-		// Save host credentials to GLOBAL settings only.
-		// These are host-level credentials, not grove-specific.
+		// Save broker credentials to GLOBAL settings only.
+		// These are broker-level credentials, not grove-specific.
 		globalDir, globalErr := config.GetGlobalDir()
 		if globalErr != nil {
 			fmt.Printf("Warning: failed to get global directory: %v\n", globalErr)
@@ -218,8 +218,8 @@ func promptHubRegistration(isGlobal bool) error {
 			if resp.BrokerToken != "" {
 				_ = config.UpdateSetting(globalDir, "hub.brokerToken", resp.BrokerToken, true)
 			}
-			if resp.Host != nil && resp.Host.ID != "" {
-				_ = config.UpdateSetting(globalDir, "hub.brokerId", resp.Host.ID, true)
+			if resp.Broker != nil && resp.Broker.ID != "" {
+				_ = config.UpdateSetting(globalDir, "hub.brokerId", resp.Broker.ID, true)
 			}
 		}
 
@@ -237,8 +237,8 @@ func promptHubRegistration(isGlobal bool) error {
 				}
 			}
 		}
-		if resp.Host != nil {
-			fmt.Printf("Host registered: %s (ID: %s)\n", resp.Host.Name, resp.Host.ID)
+		if resp.Broker != nil {
+			fmt.Printf("Host registered: %s (ID: %s)\n", resp.Broker.Name, resp.Broker.ID)
 		}
 	}
 

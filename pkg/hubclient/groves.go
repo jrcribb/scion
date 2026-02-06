@@ -31,7 +31,7 @@ type GroveService interface {
 	// ListAgents returns agents in a grove.
 	ListAgents(ctx context.Context, groveID string, opts *ListAgentsOptions) (*ListAgentsResponse, error)
 
-	// ListContributors returns runtime hosts contributing to a grove.
+	// ListContributors returns runtime brokers contributing to a grove.
 	ListContributors(ctx context.Context, groveID string) (*ListContributorsResponse, error)
 
 	// AddContributor adds a host as a contributor to a grove.
@@ -62,7 +62,7 @@ type groveService struct {
 type ListGrovesOptions struct {
 	Visibility string // Filter by visibility
 	GitRemote  string // Filter by git remote (exact or prefix)
-	BrokerID string // Filter by contributing host
+	BrokerID string // Filter by contributing broker
 	Name       string // Filter by exact name (case-insensitive)
 	Labels     map[string]string
 	Page       apiclient.PageOptions
@@ -80,15 +80,15 @@ type RegisterGroveRequest struct {
 	Name      string            `json:"name"`
 	GitRemote string            `json:"gitRemote"`
 	Path      string            `json:"path,omitempty"`
-	BrokerID string            `json:"brokerId,omitempty"`  // Link to existing host (two-phase flow)
-	Host      *HostInfo         `json:"host,omitempty"`    // DEPRECATED: Use HostID with two-phase registration
+	BrokerID string            `json:"brokerId,omitempty"`  // Link to existing broker (two-phase flow)
+	Broker    *BrokerInfo         `json:"broker,omitempty"`    // DEPRECATED: Use BrokerID with two-phase registration
 	Profiles  []string          `json:"profiles,omitempty"`
 	Mode      string            `json:"mode,omitempty"`    // connected, read-only
 	Labels    map[string]string `json:"labels,omitempty"`
 }
 
-// HostInfo describes the registering host.
-type HostInfo struct {
+// BrokerInfo describes the registering host.
+type BrokerInfo struct {
 	ID           string            `json:"id,omitempty"`
 	Name         string            `json:"name"`
 	Version      string            `json:"version"`
@@ -99,10 +99,10 @@ type HostInfo struct {
 // RegisterGroveResponse is the response from registering a grove.
 type RegisterGroveResponse struct {
 	Grove     *Grove       `json:"grove"`
-	Host      *RuntimeBroker `json:"host,omitempty"` // Populated if hostId or host provided
+	Broker    *RuntimeBroker `json:"broker,omitempty"` // Populated if brokerId or broker provided
 	Created   bool         `json:"created"`        // True if grove was newly created
 	BrokerToken string       `json:"brokerToken,omitempty"` // DEPRECATED: use two-phase registration
-	SecretKey string       `json:"secretKey,omitempty"` // DEPRECATED: secrets only from /hosts/join
+	SecretKey string       `json:"secretKey,omitempty"` // DEPRECATED: secrets only from /brokers/join
 }
 
 // CreateGroveRequest is the request for creating a grove without a host.
@@ -275,7 +275,7 @@ func (s *groveService) ListAgents(ctx context.Context, groveID string, opts *Lis
 	}, nil
 }
 
-// ListContributors returns runtime hosts contributing to a grove.
+// ListContributors returns runtime brokers contributing to a grove.
 func (s *groveService) ListContributors(ctx context.Context, groveID string) (*ListContributorsResponse, error) {
 	resp, err := s.c.transport.Get(ctx, "/api/v1/groves/"+groveID+"/contributors", nil)
 	if err != nil {

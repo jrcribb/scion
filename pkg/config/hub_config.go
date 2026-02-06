@@ -16,7 +16,7 @@ import (
 // HubServerConfig holds configuration for the Hub API server.
 type HubServerConfig struct {
 	Port         int           `json:"port" yaml:"port" koanf:"port"`
-	Host         string        `json:"host" yaml:"host" koanf:"host"`
+	Host         string        `json:"broker" yaml:"host" koanf:"host"`
 	ReadTimeout  time.Duration `json:"readTimeout" yaml:"readTimeout" koanf:"readTimeout"`
 	WriteTimeout time.Duration `json:"writeTimeout" yaml:"writeTimeout" koanf:"writeTimeout"`
 
@@ -36,14 +36,14 @@ type HubServerConfig struct {
 	AdminEmails []string `json:"adminEmails" yaml:"adminEmails" koanf:"adminEmails"`
 }
 
-// RuntimeBrokerConfig holds configuration for the Runtime Host API server.
+// RuntimeBrokerConfig holds configuration for the Runtime Broker API server.
 type RuntimeBrokerConfig struct {
-	// Enabled indicates whether the Runtime Host API is enabled
+	// Enabled indicates whether the Runtime Broker API is enabled
 	Enabled bool `json:"enabled" yaml:"enabled" koanf:"enabled"`
 	// Port is the HTTP port to listen on (default 9800)
 	Port int `json:"port" yaml:"port" koanf:"port"`
 	// Host is the address to bind to (e.g., "0.0.0.0" or "127.0.0.1")
-	Host string `json:"host" yaml:"host" koanf:"host"`
+	Host string `json:"broker" yaml:"host" koanf:"host"`
 	// ReadTimeout is the maximum duration for reading the entire request
 	ReadTimeout time.Duration `json:"readTimeout" yaml:"readTimeout" koanf:"readTimeout"`
 	// WriteTimeout is the maximum duration before timing out writes
@@ -54,9 +54,9 @@ type RuntimeBrokerConfig struct {
 	// HubEndpoint is the Hub API endpoint for status reporting (when Hub not co-located)
 	HubEndpoint string `json:"hubEndpoint" yaml:"hubEndpoint" koanf:"hubEndpoint"`
 
-	// HostID is a unique identifier for this runtime host (auto-generated if empty)
+	// HostID is a unique identifier for this runtime broker (auto-generated if empty)
 	BrokerID string `json:"brokerId" yaml:"brokerId" koanf:"brokerId"`
-	// HostName is a human-readable name for this runtime host
+	// HostName is a human-readable name for this runtime broker
 	BrokerName string `json:"brokerName" yaml:"brokerName" koanf:"brokerName"`
 
 	// CORS settings
@@ -67,7 +67,7 @@ type RuntimeBrokerConfig struct {
 	CORSMaxAge         int      `json:"corsMaxAge" yaml:"corsMaxAge" koanf:"corsMaxAge"`
 }
 
-// Runtime Host operational modes
+// Runtime Broker operational modes
 const (
 	RuntimeBrokerModeConnected = "connected"
 )
@@ -124,7 +124,7 @@ type GlobalConfig struct {
 	// Hub API server settings
 	Hub HubServerConfig `json:"hub" yaml:"hub" koanf:"hub"`
 
-	// Runtime Host API server settings
+	// Runtime Broker API server settings
 	RuntimeBroker RuntimeBrokerConfig `json:"runtimeBroker" yaml:"runtimeBroker" koanf:"runtimeBroker"`
 
 	// Database settings

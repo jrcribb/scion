@@ -8,27 +8,27 @@ import (
 	"time"
 )
 
-// HostAuthEventType defines the type of host authentication event.
-type HostAuthEventType string
+// BrokerAuthEventType defines the type of host authentication event.
+type BrokerAuthEventType string
 
 const (
-	// HostAuthEventRegister is logged when a new host is registered.
-	HostAuthEventRegister HostAuthEventType = "register"
-	// HostAuthEventJoin is logged when a host completes join.
-	HostAuthEventJoin HostAuthEventType = "join"
-	// HostAuthEventAuthSuccess is logged when a host successfully authenticates.
-	HostAuthEventAuthSuccess HostAuthEventType = "auth_success"
-	// HostAuthEventAuthFailure is logged when a host fails to authenticate.
-	HostAuthEventAuthFailure HostAuthEventType = "auth_failure"
-	// HostAuthEventRotate is logged when a host secret is rotated.
-	HostAuthEventRotate HostAuthEventType = "rotate"
-	// HostAuthEventRevoke is logged when a host secret is revoked.
-	HostAuthEventRevoke HostAuthEventType = "revoke"
+	// BrokerAuthEventRegister is logged when a new host is registered.
+	BrokerAuthEventRegister BrokerAuthEventType = "register"
+	// BrokerAuthEventJoin is logged when a host completes join.
+	BrokerAuthEventJoin BrokerAuthEventType = "join"
+	// BrokerAuthEventAuthSuccess is logged when a host successfully authenticates.
+	BrokerAuthEventAuthSuccess BrokerAuthEventType = "auth_success"
+	// BrokerAuthEventAuthFailure is logged when a host fails to authenticate.
+	BrokerAuthEventAuthFailure BrokerAuthEventType = "auth_failure"
+	// BrokerAuthEventRotate is logged when a broker secret is rotated.
+	BrokerAuthEventRotate BrokerAuthEventType = "rotate"
+	// BrokerAuthEventRevoke is logged when a broker secret is revoked.
+	BrokerAuthEventRevoke BrokerAuthEventType = "revoke"
 )
 
-// HostAuthEvent represents an auditable event related to host authentication.
-type HostAuthEvent struct {
-	EventType  HostAuthEventType `json:"eventType"`
+// BrokerAuthEvent represents an auditable event related to host authentication.
+type BrokerAuthEvent struct {
+	EventType  BrokerAuthEventType `json:"eventType"`
 	BrokerID string            `json:"brokerId"`
 	BrokerName string            `json:"brokerName,omitempty"`
 	IPAddress  string            `json:"ipAddress,omitempty"`
@@ -43,8 +43,8 @@ type HostAuthEvent struct {
 
 // AuditLogger defines the interface for logging audit events.
 type AuditLogger interface {
-	// LogHostAuthEvent logs a host authentication event.
-	LogHostAuthEvent(ctx context.Context, event *HostAuthEvent) error
+	// LogBrokerAuthEvent logs a host authentication event.
+	LogBrokerAuthEvent(ctx context.Context, event *BrokerAuthEvent) error
 }
 
 // LogAuditLogger is a simple implementation that logs to the standard logger.
@@ -64,8 +64,8 @@ func NewLogAuditLogger(prefix string, debug bool) *LogAuditLogger {
 	}
 }
 
-// LogHostAuthEvent logs a host authentication event to the standard logger.
-func (l *LogAuditLogger) LogHostAuthEvent(ctx context.Context, event *HostAuthEvent) error {
+// LogBrokerAuthEvent logs a host authentication event to the standard logger.
+func (l *LogAuditLogger) LogBrokerAuthEvent(ctx context.Context, event *BrokerAuthEvent) error {
 	level := slog.LevelInfo
 	if !event.Success {
 		level = slog.LevelWarn
@@ -117,7 +117,7 @@ func AuditableBrokerAuthMiddleware(svc *BrokerAuthService, logger AuditLogger) f
 			}
 
 			// Create base event
-			event := &HostAuthEvent{
+			event := &BrokerAuthEvent{
 				BrokerID:    brokerID,
 				IPAddress: getClientIP(r),
 				UserAgent: r.UserAgent(),
@@ -127,12 +127,12 @@ func AuditableBrokerAuthMiddleware(svc *BrokerAuthService, logger AuditLogger) f
 			// Validate HMAC signature
 			identity, err := svc.ValidateHostSignature(r.Context(), r)
 			if err != nil {
-				event.EventType = HostAuthEventAuthFailure
+				event.EventType = BrokerAuthEventAuthFailure
 				event.Success = false
 				event.FailReason = err.Error()
 
 				if logger != nil {
-					_ = logger.LogHostAuthEvent(r.Context(), event)
+					_ = logger.LogBrokerAuthEvent(r.Context(), event)
 				}
 
 				writeHostAuthError(w, err.Error())
@@ -140,11 +140,11 @@ func AuditableBrokerAuthMiddleware(svc *BrokerAuthService, logger AuditLogger) f
 			}
 
 			// Log success
-			event.EventType = HostAuthEventAuthSuccess
+			event.EventType = BrokerAuthEventAuthSuccess
 			event.Success = true
 
 			if logger != nil {
-				_ = logger.LogHostAuthEvent(r.Context(), event)
+				_ = logger.LogBrokerAuthEvent(r.Context(), event)
 			}
 
 			// Set both host-specific and generic identity contexts
@@ -183,8 +183,8 @@ func LogRegistrationEvent(ctx context.Context, logger AuditLogger, brokerID, bro
 		return
 	}
 
-	event := &HostAuthEvent{
-		EventType: HostAuthEventRegister,
+	event := &BrokerAuthEvent{
+		EventType: BrokerAuthEventRegister,
 		BrokerID:    brokerID,
 		BrokerName:  brokerName,
 		IPAddress: ipAddress,
@@ -194,7 +194,7 @@ func LogRegistrationEvent(ctx context.Context, logger AuditLogger, brokerID, bro
 		Timestamp: time.Now(),
 	}
 
-	_ = logger.LogHostAuthEvent(ctx, event)
+	_ = logger.LogBrokerAuthEvent(ctx, event)
 }
 
 // LogJoinEvent logs a host join event.
@@ -203,8 +203,8 @@ func LogJoinEvent(ctx context.Context, logger AuditLogger, brokerID, ipAddress s
 		return
 	}
 
-	event := &HostAuthEvent{
-		EventType:  HostAuthEventJoin,
+	event := &BrokerAuthEvent{
+		EventType:  BrokerAuthEventJoin,
 		BrokerID:     brokerID,
 		IPAddress:  ipAddress,
 		Success:    success,
@@ -212,7 +212,7 @@ func LogJoinEvent(ctx context.Context, logger AuditLogger, brokerID, ipAddress s
 		Timestamp:  time.Now(),
 	}
 
-	_ = logger.LogHostAuthEvent(ctx, event)
+	_ = logger.LogBrokerAuthEvent(ctx, event)
 }
 
 // LogRotateEvent logs a secret rotation event.
@@ -221,8 +221,8 @@ func LogRotateEvent(ctx context.Context, logger AuditLogger, brokerID, actorID, 
 		return
 	}
 
-	event := &HostAuthEvent{
-		EventType: HostAuthEventRotate,
+	event := &BrokerAuthEvent{
+		EventType: BrokerAuthEventRotate,
 		BrokerID:    brokerID,
 		IPAddress: ipAddress,
 		Success:   true,
@@ -231,5 +231,5 @@ func LogRotateEvent(ctx context.Context, logger AuditLogger, brokerID, actorID, 
 		Timestamp: time.Now(),
 	}
 
-	_ = logger.LogHostAuthEvent(ctx, event)
+	_ = logger.LogBrokerAuthEvent(ctx, event)
 }

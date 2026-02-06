@@ -596,11 +596,11 @@ The specific approach will be determined based on the chosen cloud backend.
 
 ## 9. System Component Logging
 
-While `sciontool` handles telemetry for agents, the Hub and Runtime Host servers require a robust internal logging strategy for operational observability.
+While `sciontool` handles telemetry for agents, the Hub and Runtime Broker servers require a robust internal logging strategy for operational observability.
 
 ### 9.1 Structured Logging with slog
 
-All backend components (Hub, Runtime Host) must use the Go standard library's `log/slog` package for structured logging.
+All backend components (Hub, Runtime Broker) must use the Go standard library's `log/slog` package for structured logging.
 
 - **Standardization**: Consistent key names across all components (e.g., `msg`, `level`, `time`, `component`, `trace_id`).
 - **Performance**: High-performance structured logging with minimal allocation overhead.
@@ -808,7 +808,7 @@ telemetry:
 
 **Details:**
 - We will assume that the key libraries will be able to load via the 'application default credentials' pattern.
-- It will be up to the runtime host design to ensure these are available to the sciontool environment.
+- It will be up to the runtime broker design to ensure these are available to the sciontool environment.
 
 ### 11.9 Data Resiliency
 
@@ -885,7 +885,7 @@ telemetry:
 **Deliverables:**
 - [x] **Hook Normalization**: TelemetryHandler converts harness hooks to OTLP spans with `agent.*` naming.
 - [x] **Session Parsing**: Logic to parse Gemini CLI `session-*.json` files on session end.
-- [x] **Log Bridge**: `otelslog` integration for Hub and Runtime Host structured logging.
+- [x] **Log Bridge**: `otelslog` integration for Hub and Runtime Broker structured logging.
 - [x] **Attribute Redaction**: Privacy filter implementation for sensitive fields (redact + hash).
 
 **Test Criteria:**
@@ -933,7 +933,7 @@ On `session-end` events, the TelemetryHandler parses the latest Gemini session f
 
 **OTel Log Bridge Pattern:**
 
-The Hub and Runtime Host use a multi-handler approach:
+The Hub and Runtime Broker use a multi-handler approach:
 1. Base handler (JSON or GCP-formatted) for local output
 2. OTel bridge handler for forwarding to OTLP endpoint
 3. Both handlers receive all log records simultaneously

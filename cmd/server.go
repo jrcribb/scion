@@ -29,7 +29,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// GlobalGroveName is the special name for the default grove when hub and runtime-host run together
+// GlobalGroveName is the special name for the default grove when hub and runtime-broker run together
 const GlobalGroveName = "global"
 
 var (
@@ -45,11 +45,11 @@ var (
 	storageBucket     string
 	storageDir        string
 
-	// Template cache settings for Runtime Host
+	// Template cache settings for Runtime Broker
 	templateCacheDir string
 	templateCacheMax int64
 
-	// Testing flag to simulate remote host behavior when running co-located
+	// Testing flag to simulate remote broker behavior when running co-located
 	simulateRemoteBroker bool
 
 	// Admin emails for bootstrapping - comma-separated list
@@ -64,7 +64,7 @@ var serverCmd = &cobra.Command{
 
 The server provides:
 - Hub API: Central registry for groves, agents, and templates (port 9810)
-- Runtime Host API: Agent lifecycle management on compute nodes (port 9800)
+- Runtime Broker API: Agent lifecycle management on compute nodes (port 9800)
 - Web Frontend: Browser-based UI (coming soon, port 9820)`,
 }
 
@@ -76,7 +76,7 @@ var serverStartCmd = &cobra.Command{
 
 Server Components:
 - Hub API (--enable-hub): Central coordination for groves, agents, templates
-- Runtime Host API (--enable-runtime-broker): Agent lifecycle on this compute node
+- Runtime Broker API (--enable-runtime-broker): Agent lifecycle on this compute node
 
 Configuration can be provided via:
 - Config file (--config flag or ~/.scion/server.yaml)
@@ -87,13 +87,13 @@ Examples:
   # Start Hub API only
   scion server start --enable-hub
 
-  # Start Runtime Host API only
+  # Start Runtime Broker API only
   scion server start --enable-runtime-broker
 
-  # Start both Hub and Runtime Host
+  # Start both Hub and Runtime Broker
   scion server start --enable-hub --enable-runtime-broker
 
-  # Start Runtime Host with custom port
+  # Start Runtime Broker with custom port
   scion server start --enable-runtime-broker --runtime-broker-port 9800`,
 	RunE: runServerStart,
 }
@@ -152,7 +152,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 	if enableHub && !enableRuntimeBroker {
 		component = "scion-hub"
 	} else if !enableHub && enableRuntimeBroker {
-		component = "scion-host"
+		component = "scion-broker"
 	}
 
 	// Initialize OTel logging if configured
@@ -178,7 +178,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("port") {
 		cfg.Hub.Port = hubPort
 	}
-	if cmd.Flags().Changed("host") {
+	if cmd.Flags().Changed("broker") {
 		cfg.Hub.Host = hubHost
 	}
 	if cmd.Flags().Changed("db") {
@@ -224,7 +224,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ensure global directory exists and settings are initialized.
-	// This is required for persisting the runtime host identity.
+	// This is required for persisting the runtime broker identity.
 	globalDir, err := config.GetGlobalDir()
 	if err != nil {
 		return fmt.Errorf("failed to get global directory: %w", err)
@@ -257,7 +257,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			if status.isScionServer {
 				return fmt.Errorf("a scion server is already running on port %d\nUse 'scion server status' to check or 'scion server stop' to stop it", cfg.RuntimeBroker.Port)
 			}
-			return fmt.Errorf("Runtime Host port %d is already in use by another process", cfg.RuntimeBroker.Port)
+			return fmt.Errorf("Runtime Broker port %d is already in use by another process", cfg.RuntimeBroker.Port)
 		}
 	}
 
@@ -310,7 +310,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Variables to track runtime host info for co-located registration
+	// Variables to track runtime broker info for co-located registration
 	var brokerID string
 	var brokerName string
 	var rt runtime.Runtime
@@ -377,7 +377,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			AuthorizedDomains:  cfg.Auth.AuthorizedDomains,
 			AdminEmails:        adminEmailList,
 			HubEndpoint:        cfg.Hub.Endpoint,
-			BrokerAuthConfig:     hub.DefaultBrokerAuthConfig(), // Enable host HMAC authentication
+			BrokerAuthConfig:     hub.DefaultBrokerAuthConfig(), // Enable broker HMAC authentication
 			OAuthConfig: hub.OAuthConfig{
 				Web: hub.OAuthClientConfig{
 					Google: hub.OAuthProviderConfig{
@@ -444,7 +444,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
-	// Start Runtime Host API if enabled
+	// Start Runtime Broker API if enabled
 	if cfg.RuntimeBroker.Enabled {
 		// Initialize runtime (auto-detect based on environment)
 		rt = runtime.GetRuntime("", "")
@@ -452,7 +452,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		// Create agent manager
 		mgr = agent.NewManager(rt)
 
-		// Load settings to get/persist runtime host identity.
+		// Load settings to get/persist runtime broker identity.
 		// The brokerID should be durable across server restarts, so we store it in settings.
 		settings, err := config.LoadSettings(globalDir)
 		if err != nil {
@@ -465,7 +465,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			settings.Hub = &config.HubClientConfig{}
 		}
 
-		// Get host ID from settings, or generate and persist if not set.
+		// Get broker ID from settings, or generate and persist if not set.
 		// Priority: settings.Hub.BrokerID > cfg.RuntimeBroker.BrokerID > generate new
 		brokerID = settings.Hub.BrokerID
 		if brokerID == "" {
@@ -476,9 +476,9 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			// Generate new UUID and persist it
 			brokerID = api.NewUUID()
 			if err := config.UpdateSetting(globalDir, "hub.brokerId", brokerID, true); err != nil {
-				log.Printf("Warning: failed to persist host ID to settings: %v", err)
+				log.Printf("Warning: failed to persist broker ID to settings: %v", err)
 			} else {
-				log.Printf("Generated and persisted new host ID: %s", brokerID)
+				log.Printf("Generated and persisted new broker ID: %s", brokerID)
 			}
 		}
 
@@ -492,7 +492,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			if hostname, err := os.Hostname(); err == nil {
 				brokerName = hostname
 			} else {
-				brokerName = "runtime-host"
+				brokerName = "runtime-broker"
 			}
 		}
 
@@ -503,7 +503,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			hubEndpointForRH = settings.Hub.Endpoint
 		}
 
-		// Create Runtime Host server configuration
+		// Create Runtime Broker server configuration
 		rhCfg := runtimehost.ServerConfig{
 			Port:               cfg.RuntimeBroker.Port,
 			Host:               cfg.RuntimeBroker.Host,
@@ -533,17 +533,17 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			HeartbeatEnabled:      hubEndpointForRH != "",
 		}
 
-		// Create Runtime Host server
+		// Create Runtime Broker server
 		rhSrv := runtimehost.New(rhCfg, mgr, rt)
 
-		log.Printf("Starting Runtime Host API server on %s:%d (mode: %s)",
+		log.Printf("Starting Runtime Broker API server on %s:%d (mode: %s)",
 			cfg.RuntimeBroker.Host, cfg.RuntimeBroker.Port, cfg.RuntimeBroker.Mode)
 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := rhSrv.Start(ctx); err != nil {
-				errCh <- fmt.Errorf("runtime host server error: %w", err)
+				errCh <- fmt.Errorf("runtime broker server error: %w", err)
 			}
 		}()
 	}
@@ -556,8 +556,8 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		log.Printf("Agent dispatcher configured (HTTP-based)")
 	}
 
-	// When RuntimeBroker is also enabled and not simulating remote host,
-	// register the global grove and this host for co-located operation.
+	// When RuntimeBroker is also enabled and not simulating remote broker,
+	// register the global grove and this broker for co-located operation.
 	if enableHub && cfg.RuntimeBroker.Enabled && s != nil && hubSrv != nil && mgr != nil && !simulateRemoteBroker {
 		// Build RuntimeBroker endpoint for registration
 		rhEndpoint := fmt.Sprintf("http://%s:%d", cfg.RuntimeBroker.Host, cfg.RuntimeBroker.Port)
@@ -566,14 +566,14 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			rhEndpoint = fmt.Sprintf("http://localhost:%d", cfg.RuntimeBroker.Port)
 		}
 
-		// Register global grove and runtime host
+		// Register global grove and runtime broker
 		if err := registerGlobalGroveAndBroker(ctx, s, brokerID, brokerName, rhEndpoint, rt); err != nil {
 			log.Printf("Warning: failed to register global grove: %v", err)
 		} else {
-			log.Printf("Registered global grove with runtime host %s (endpoint: %s)", brokerName, rhEndpoint)
+			log.Printf("Registered global grove with runtime broker %s (endpoint: %s)", brokerName, rhEndpoint)
 		}
 	} else if simulateRemoteBroker && enableHub && cfg.RuntimeBroker.Enabled {
-		log.Printf("Simulating remote host: skipping automatic global grove registration")
+		log.Printf("Simulating remote broker: skipping automatic global grove registration")
 	}
 
 	// Wait for either an error or context cancellation
@@ -589,7 +589,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 }
 
 // registerGlobalGroveAndBroker creates the global grove and registers this
-// runtime host as a contributor. This enables automatic agent handoff.
+// runtime broker as a contributor. This enables automatic agent handoff.
 func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, brokerName, endpoint string, rt runtime.Runtime) error {
 	// Check if global grove already exists
 	globalGrove, err := s.GetGroveBySlug(ctx, GlobalGroveName)
@@ -619,7 +619,7 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 		groveNeedsDefaultBroker = true
 	}
 
-	// Create or update the runtime host record (must happen before setting as default)
+	// Create or update the runtime broker record (must happen before setting as default)
 	runtimeType := "docker"
 	if rt != nil {
 		runtimeType = rt.Name()
@@ -627,7 +627,7 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 
 	broker, err := s.GetRuntimeBroker(ctx, brokerID)
 	if err != nil && err != store.ErrNotFound {
-		return fmt.Errorf("failed to check for runtime host: %w", err)
+		return fmt.Errorf("failed to check for runtime broker: %w", err)
 	}
 
 	if broker == nil {
@@ -651,24 +651,24 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 		}
 
 		if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-			return fmt.Errorf("failed to create runtime host: %w", err)
+			return fmt.Errorf("failed to create runtime broker: %w", err)
 		}
 	} else {
-		// Update existing host status and endpoint
+		// Update existing broker status and endpoint
 		broker.Status = store.BrokerStatusOnline
 		broker.ConnectionState = "connected"
 		broker.Endpoint = endpoint
 		broker.LastHeartbeat = time.Now()
 		if err := s.UpdateRuntimeBroker(ctx, broker); err != nil {
-			return fmt.Errorf("failed to update runtime host: %w", err)
+			return fmt.Errorf("failed to update runtime broker: %w", err)
 		}
 	}
 
-	// Now that the runtime host exists, set it as the default for the grove
+	// Now that the runtime broker exists, set it as the default for the grove
 	if groveNeedsDefaultBroker {
 		globalGrove.DefaultRuntimeBrokerID = brokerID
 		if err := s.UpdateGrove(ctx, globalGrove); err != nil {
-			log.Printf("Warning: failed to set default runtime host for global grove: %v", err)
+			log.Printf("Warning: failed to set default runtime broker for global grove: %v", err)
 		}
 	}
 
@@ -679,7 +679,7 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 		globalPath = "" // Will work but agents may not find the right path
 	}
 
-	// Add runtime host as contributor to global grove
+	// Add runtime broker as contributor to global grove
 	contrib := &store.GroveContributor{
 		GroveID:   globalGrove.ID,
 		BrokerID:    brokerID,
@@ -705,11 +705,11 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 }
 
 // agentDispatcherAdapter adapts the agent.Manager to the hub.AgentDispatcher interface.
-// This enables the Hub to dispatch agent creation to a co-located runtime host.
+// This enables the Hub to dispatch agent creation to a co-located runtime broker.
 type agentDispatcherAdapter struct {
 	manager agent.Manager
 	store   store.Store
-	brokerID  string // The ID of this runtime host
+	brokerID  string // The ID of this runtime broker
 }
 
 // newAgentDispatcherAdapter creates a new dispatcher adapter.
@@ -722,9 +722,9 @@ func newAgentDispatcherAdapter(mgr agent.Manager, s store.Store, brokerID string
 }
 
 // DispatchAgentCreate implements hub.AgentDispatcher.
-// It starts the agent on the runtime host and updates the hub store with runtime info.
+// It starts the agent on the runtime broker and updates the hub store with runtime info.
 func (d *agentDispatcherAdapter) DispatchAgentCreate(ctx context.Context, hubAgent *store.Agent) error {
-	// Look up the local path for this grove on this runtime host
+	// Look up the local path for this grove on this runtime broker
 	var grovePath string
 	if hubAgent.GroveID != "" && d.brokerID != "" {
 		contrib, err := d.store.GetGroveContributor(ctx, hubAgent.GroveID, d.brokerID)
@@ -758,13 +758,13 @@ func (d *agentDispatcherAdapter) DispatchAgentCreate(ctx context.Context, hubAge
 
 	if hubAgent.AppliedConfig != nil {
 		opts.Template = hubAgent.AppliedConfig.Harness
-		// Pass the task through to the runtime host
+		// Pass the task through to the runtime broker
 		if hubAgent.AppliedConfig.Task != "" {
 			opts.Task = hubAgent.AppliedConfig.Task
 		}
 	}
 
-	// Start the agent on the runtime host
+	// Start the agent on the runtime broker
 	agentInfo, err := d.manager.Start(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("failed to start agent: %w", err)
@@ -786,7 +786,7 @@ func (d *agentDispatcherAdapter) DispatchAgentCreate(ctx context.Context, hubAge
 }
 
 // DispatchAgentStart implements hub.AgentDispatcher.
-// For co-located runtime hosts, this resumes a stopped agent.
+// For co-located runtime brokers, this resumes a stopped agent.
 func (d *agentDispatcherAdapter) DispatchAgentStart(ctx context.Context, hubAgent *store.Agent) error {
 	// For now, starting an existing agent is not fully supported in the manager
 	// The manager's Start method creates new agents, not resumes existing ones
@@ -796,7 +796,7 @@ func (d *agentDispatcherAdapter) DispatchAgentStart(ctx context.Context, hubAgen
 }
 
 // DispatchAgentStop implements hub.AgentDispatcher.
-// It stops a running agent on the runtime host.
+// It stops a running agent on the runtime broker.
 func (d *agentDispatcherAdapter) DispatchAgentStop(ctx context.Context, hubAgent *store.Agent) error {
 	if err := d.manager.Stop(ctx, hubAgent.Name); err != nil {
 		return fmt.Errorf("failed to stop agent: %w", err)
@@ -814,7 +814,7 @@ func (d *agentDispatcherAdapter) DispatchAgentStop(ctx context.Context, hubAgent
 }
 
 // DispatchAgentRestart implements hub.AgentDispatcher.
-// It restarts an agent on the runtime host.
+// It restarts an agent on the runtime broker.
 func (d *agentDispatcherAdapter) DispatchAgentRestart(ctx context.Context, hubAgent *store.Agent) error {
 	// Stop then start
 	if err := d.manager.Stop(ctx, hubAgent.Name); err != nil {
@@ -834,9 +834,9 @@ func (d *agentDispatcherAdapter) DispatchAgentRestart(ctx context.Context, hubAg
 }
 
 // DispatchAgentDelete implements hub.AgentDispatcher.
-// It removes an agent from the runtime host.
+// It removes an agent from the runtime broker.
 func (d *agentDispatcherAdapter) DispatchAgentDelete(ctx context.Context, hubAgent *store.Agent, deleteFiles, removeBranch bool) error {
-	// Look up the local path for this grove on this runtime host
+	// Look up the local path for this grove on this runtime broker
 	var grovePath string
 	if hubAgent.GroveID != "" && d.brokerID != "" {
 		contrib, err := d.store.GetGroveContributor(ctx, hubAgent.GroveID, d.brokerID)
@@ -860,7 +860,7 @@ func (d *agentDispatcherAdapter) DispatchAgentDelete(ctx context.Context, hubAge
 }
 
 // DispatchAgentMessage implements hub.AgentDispatcher.
-// It sends a message to an agent on the runtime host.
+// It sends a message to an agent on the runtime broker.
 func (d *agentDispatcherAdapter) DispatchAgentMessage(ctx context.Context, hubAgent *store.Agent, message string, interrupt bool) error {
 	if err := d.manager.Message(ctx, hubAgent.Name, message, interrupt); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
@@ -906,9 +906,9 @@ func init() {
 	serverStartCmd.Flags().StringVar(&hubHost, "host", "0.0.0.0", "Hub API host to bind")
 	serverStartCmd.Flags().StringVar(&dbURL, "db", "", "Database URL/path")
 
-	// Runtime Host API flags
-	serverStartCmd.Flags().BoolVar(&enableRuntimeBroker, "enable-runtime-broker", false, "Enable the Runtime Host API")
-	serverStartCmd.Flags().IntVar(&runtimeBrokerPort, "runtime-broker-port", 9800, "Runtime Host API port")
+	// Runtime Broker API flags
+	serverStartCmd.Flags().BoolVar(&enableRuntimeBroker, "enable-runtime-broker", false, "Enable the Runtime Broker API")
+	serverStartCmd.Flags().IntVar(&runtimeBrokerPort, "runtime-broker-port", 9800, "Runtime Broker API port")
 
 	// Auth flags
 	serverStartCmd.Flags().BoolVar(&enableDevAuth, "dev-auth", false, "Enable development authentication (auto-generates token)")
@@ -920,12 +920,12 @@ func init() {
 	serverStartCmd.Flags().StringVar(&storageBucket, "storage-bucket", "", "GCS bucket name for template storage")
 	serverStartCmd.Flags().StringVar(&storageDir, "storage-dir", "", "Local directory for template storage (alternative to GCS)")
 
-	// Template cache flags (for Runtime Host)
+	// Template cache flags (for Runtime Broker)
 	serverStartCmd.Flags().StringVar(&templateCacheDir, "template-cache-dir", "", "Directory for caching templates from Hub (default: ~/.scion/cache/templates)")
 	serverStartCmd.Flags().Int64Var(&templateCacheMax, "template-cache-max", 100*1024*1024, "Maximum template cache size in bytes (default: 100MB)")
 
 	// Testing flags
-	serverStartCmd.Flags().BoolVar(&simulateRemoteBroker, "simulate-remote-broker", false, "Skip co-located optimizations to test full remote host code path")
+	serverStartCmd.Flags().BoolVar(&simulateRemoteBroker, "simulate-remote-broker", false, "Skip co-located optimizations to test full remote broker code path")
 
 	// Admin bootstrap flags
 	serverStartCmd.Flags().StringVar(&adminEmails, "admin-emails", "", "Comma-separated list of email addresses to auto-promote to admin role")

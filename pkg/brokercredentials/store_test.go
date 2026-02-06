@@ -34,7 +34,7 @@ func TestStore_SaveLoad(t *testing.T) {
 	}
 
 	if loaded.BrokerID != creds.BrokerID {
-		t.Errorf("HostID mismatch: expected %q, got %q", creds.BrokerID, loaded.BrokerID)
+		t.Errorf("BrokerID mismatch: expected %q, got %q", creds.BrokerID, loaded.BrokerID)
 	}
 	if loaded.SecretKey != creds.SecretKey {
 		t.Errorf("SecretKey mismatch: expected %q, got %q", creds.SecretKey, loaded.SecretKey)
@@ -280,7 +280,7 @@ func TestStore_SaveFromJoinResponse(t *testing.T) {
 	}
 
 	if creds.BrokerID != "host-123" {
-		t.Errorf("HostID mismatch: got %q", creds.BrokerID)
+		t.Errorf("BrokerID mismatch: got %q", creds.BrokerID)
 	}
 	if creds.SecretKey != "c2VjcmV0" {
 		t.Errorf("SecretKey mismatch: got %q", creds.SecretKey)

@@ -56,7 +56,7 @@ func TestHostRegistrationAndJoin(t *testing.T) {
 	}
 
 	if resp.BrokerID == "" {
-		t.Error("HostID should not be empty")
+		t.Error("BrokerID should not be empty")
 	}
 	if resp.JoinToken == "" {
 		t.Error("JoinToken should not be empty")
@@ -72,7 +72,7 @@ func TestHostRegistrationAndJoin(t *testing.T) {
 	}
 
 	// Complete the join
-	joinReq := HostJoinRequest{
+	joinReq := BrokerJoinRequest{
 		BrokerID:    resp.BrokerID,
 		JoinToken: resp.JoinToken,
 		Hostname:  "test-hostname",
@@ -85,7 +85,7 @@ func TestHostRegistrationAndJoin(t *testing.T) {
 	}
 
 	if joinResp.BrokerID != resp.BrokerID {
-		t.Errorf("HostID mismatch: got %s, want %s", joinResp.BrokerID, resp.BrokerID)
+		t.Errorf("BrokerID mismatch: got %s, want %s", joinResp.BrokerID, resp.BrokerID)
 	}
 	if joinResp.SecretKey == "" {
 		t.Error("SecretKey should not be empty")
@@ -116,7 +116,7 @@ func TestJoinWithInvalidToken(t *testing.T) {
 	}
 
 	// Try to join with wrong token
-	joinReq := HostJoinRequest{
+	joinReq := BrokerJoinRequest{
 		BrokerID:    resp.BrokerID,
 		JoinToken: JoinTokenPrefix + "invalid-token",
 		Hostname:  "test",
@@ -155,7 +155,7 @@ func TestJoinWithExpiredToken(t *testing.T) {
 	}
 
 	// Try to join
-	joinReq := HostJoinRequest{
+	joinReq := BrokerJoinRequest{
 		BrokerID:    resp.BrokerID,
 		JoinToken: resp.JoinToken,
 		Hostname:  "test",
@@ -182,7 +182,7 @@ func TestJoinTokenSingleUse(t *testing.T) {
 		t.Fatalf("CreateHostRegistration failed: %v", err)
 	}
 
-	joinReq := HostJoinRequest{
+	joinReq := BrokerJoinRequest{
 		BrokerID:    resp.BrokerID,
 		JoinToken: resp.JoinToken,
 		Hostname:  "test",
@@ -218,7 +218,7 @@ func TestValidateHostSignature(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	secretKey := []byte("test-secret-key-32-bytes-long!!")
@@ -229,7 +229,7 @@ func TestValidateHostSignature(t *testing.T) {
 		Status:    store.BrokerSecretStatusActive,
 	}
 	if err := s.CreateBrokerSecret(ctx, secret); err != nil {
-		t.Fatalf("failed to create host secret: %v", err)
+		t.Fatalf("failed to create broker secret: %v", err)
 	}
 
 	// Create a signed request
@@ -261,7 +261,7 @@ func TestValidateHostSignature(t *testing.T) {
 	}
 
 	if identity.BrokerID() != brokerID {
-		t.Errorf("HostID mismatch: got %s, want %s", identity.BrokerID(), brokerID)
+		t.Errorf("BrokerID mismatch: got %s, want %s", identity.BrokerID(), brokerID)
 	}
 	if identity.Type() != "host" {
 		t.Errorf("Type mismatch: got %s, want host", identity.Type())
@@ -284,7 +284,7 @@ func TestValidateHostSignature_InvalidSignature(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	secret := &store.BrokerSecret{
@@ -294,7 +294,7 @@ func TestValidateHostSignature_InvalidSignature(t *testing.T) {
 		Status:    store.BrokerSecretStatusActive,
 	}
 	if err := s.CreateBrokerSecret(ctx, secret); err != nil {
-		t.Fatalf("failed to create host secret: %v", err)
+		t.Fatalf("failed to create broker secret: %v", err)
 	}
 
 	// Create a request with wrong signature
@@ -340,7 +340,7 @@ func TestValidateHostSignature_ClockSkew(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	secret := &store.BrokerSecret{
@@ -350,7 +350,7 @@ func TestValidateHostSignature_ClockSkew(t *testing.T) {
 		Status:    store.BrokerSecretStatusActive,
 	}
 	if err := s.CreateBrokerSecret(ctx, secret); err != nil {
-		t.Fatalf("failed to create host secret: %v", err)
+		t.Fatalf("failed to create broker secret: %v", err)
 	}
 
 	// Create a request with old timestamp
@@ -437,7 +437,7 @@ func TestBrokerAuthMiddleware(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	secretKey := []byte("middleware-secret-key-32-bytes!!")
@@ -448,7 +448,7 @@ func TestBrokerAuthMiddleware(t *testing.T) {
 		Status:    store.BrokerSecretStatusActive,
 	}
 	if err := s.CreateBrokerSecret(ctx, secret); err != nil {
-		t.Fatalf("failed to create host secret: %v", err)
+		t.Fatalf("failed to create broker secret: %v", err)
 	}
 
 	// Create a handler that checks for host identity
@@ -504,7 +504,7 @@ func TestBrokerAuthMiddleware(t *testing.T) {
 			t.Fatal("Expected identity to be set")
 		}
 		if gotIdentity.BrokerID() != brokerID {
-			t.Errorf("HostID mismatch: got %s, want %s", gotIdentity.BrokerID(), brokerID)
+			t.Errorf("BrokerID mismatch: got %s, want %s", gotIdentity.BrokerID(), brokerID)
 		}
 	})
 
@@ -566,7 +566,7 @@ func TestGenerateAndStoreSecret(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	// Generate secret
@@ -615,7 +615,7 @@ func TestGenerateAndStoreSecret_ReturnsExistingSecret(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	// Generate secret first time
@@ -667,7 +667,7 @@ func TestGenerateAndStoreSecret_CanBeUsedForHMACAuth(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	// Generate secret
@@ -704,6 +704,6 @@ func TestGenerateAndStoreSecret_CanBeUsedForHMACAuth(t *testing.T) {
 	}
 
 	if identity.BrokerID() != brokerID {
-		t.Errorf("HostID mismatch: got %s, want %s", identity.BrokerID(), brokerID)
+		t.Errorf("BrokerID mismatch: got %s, want %s", identity.BrokerID(), brokerID)
 	}
 }

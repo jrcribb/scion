@@ -16,7 +16,7 @@ import (
 )
 
 func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
-	// Create a test store with a host secret
+	// Create a test store with a broker secret
 	db, err := sqlite.New(":memory:")
 	if err != nil {
 		t.Fatalf("failed to create test store: %v", err)
@@ -41,7 +41,7 @@ func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := db.CreateRuntimeBroker(context.Background(), broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	secret := &store.BrokerSecret{
@@ -52,7 +52,7 @@ func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	if err := db.CreateBrokerSecret(context.Background(), secret); err != nil {
-		t.Fatalf("failed to create host secret: %v", err)
+		t.Fatalf("failed to create broker secret: %v", err)
 	}
 
 	// Create a test server that validates HMAC signatures
@@ -131,7 +131,7 @@ func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
 }
 
 func TestAuthenticatedHostClient_StartAgent(t *testing.T) {
-	// Create a test store with a host secret
+	// Create a test store with a broker secret
 	db, err := sqlite.New(":memory:")
 	if err != nil {
 		t.Fatalf("failed to create test store: %v", err)
@@ -156,7 +156,7 @@ func TestAuthenticatedHostClient_StartAgent(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := db.CreateRuntimeBroker(context.Background(), broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	secret := &store.BrokerSecret{
@@ -167,7 +167,7 @@ func TestAuthenticatedHostClient_StartAgent(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	if err := db.CreateBrokerSecret(context.Background(), secret); err != nil {
-		t.Fatalf("failed to create host secret: %v", err)
+		t.Fatalf("failed to create broker secret: %v", err)
 	}
 
 	// Create a test server
@@ -230,7 +230,7 @@ func TestAuthenticatedHostClient_MissingSecret(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := db.CreateRuntimeBroker(context.Background(), broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	// Create a test server that checks if request is unsigned
@@ -293,7 +293,7 @@ func TestAuthenticatedHostClient_ExpiredSecret(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := db.CreateRuntimeBroker(context.Background(), broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	secret := &store.BrokerSecret{
@@ -305,7 +305,7 @@ func TestAuthenticatedHostClient_ExpiredSecret(t *testing.T) {
 		ExpiresAt: time.Now().Add(-1 * time.Hour), // Expired 1 hour ago
 	}
 	if err := db.CreateBrokerSecret(context.Background(), secret); err != nil {
-		t.Fatalf("failed to create host secret: %v", err)
+		t.Fatalf("failed to create broker secret: %v", err)
 	}
 
 	// Create a test server
@@ -341,7 +341,7 @@ func TestAuthenticatedHostClient_ExpiredSecret(t *testing.T) {
 }
 
 func TestAuthenticatedHostClient_AllOperations(t *testing.T) {
-	// Create a test store with a host secret
+	// Create a test store with a broker secret
 	db, err := sqlite.New(":memory:")
 	if err != nil {
 		t.Fatalf("failed to create test store: %v", err)
@@ -366,7 +366,7 @@ func TestAuthenticatedHostClient_AllOperations(t *testing.T) {
 		Updated: time.Now(),
 	}
 	if err := db.CreateRuntimeBroker(context.Background(), broker); err != nil {
-		t.Fatalf("failed to create runtime host: %v", err)
+		t.Fatalf("failed to create runtime broker: %v", err)
 	}
 
 	secret := &store.BrokerSecret{
@@ -377,7 +377,7 @@ func TestAuthenticatedHostClient_AllOperations(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	if err := db.CreateBrokerSecret(context.Background(), secret); err != nil {
-		t.Fatalf("failed to create host secret: %v", err)
+		t.Fatalf("failed to create broker secret: %v", err)
 	}
 
 	// Track requests
