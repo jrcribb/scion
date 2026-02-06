@@ -270,6 +270,13 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 		Workspace: workspace,
 	}
 
+	// Propagate debug mode to container so sciontool logs debug info
+	if debugMode {
+		opts.Env = map[string]string{
+			"SCION_DEBUG": "1",
+		}
+	}
+
 	// We still might want to show some progress in the CLI
 	if resume {
 		fmt.Printf("Resuming agent '%s'...\n", agentName)
