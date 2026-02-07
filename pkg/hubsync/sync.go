@@ -301,6 +301,30 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 	}
 
 	if !effectiveSyncResult.IsInSync() {
+		// Check if there are agents to register but no brokers available
+		if len(effectiveSyncResult.ToRegister) > 0 {
+			hasOnlineBroker, err := checkBrokerAvailability(context.Background(), hubCtx)
+			if err != nil {
+				debugf("Warning: failed to check broker availability: %v", err)
+				// Continue with sync attempt - the error will surface during ExecuteSync
+			} else if !hasOnlineBroker {
+				// No brokers available - print warning and skip sync
+				fmt.Println()
+				fmt.Println("Warning: No runtime brokers are available for this grove.")
+				fmt.Println("Agent sync cannot be performed without an online broker.")
+				fmt.Println()
+				fmt.Println("Local agents not registered on Hub:")
+				for _, name := range effectiveSyncResult.ToRegister {
+					fmt.Printf("  + %s\n", name)
+				}
+				fmt.Println()
+				fmt.Println("To register agents, ensure a runtime broker is running and connected.")
+				fmt.Println()
+				// Continue without syncing - this allows read operations like list to proceed
+				return hubCtx, nil
+			}
+		}
+
 		if ShowSyncPlan(effectiveSyncResult, opts.AutoConfirm) {
 			if err := ExecuteSync(context.Background(), hubCtx, effectiveSyncResult, opts.AutoConfirm); err != nil {
 				return nil, wrapHubError(fmt.Errorf("failed to sync agents: %w", err))
@@ -313,6 +337,25 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 	}
 
 	return hubCtx, nil
+}
+
+// checkBrokerAvailability checks if there are any online brokers for the grove.
+func checkBrokerAvailability(ctx context.Context, hubCtx *HubContext) (bool, error) {
+	ctxTimeout, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	resp, err := hubCtx.Client.Groves().ListContributors(ctxTimeout, hubCtx.GroveID)
+	if err != nil {
+		return false, fmt.Errorf("failed to list grove contributors: %w", err)
+	}
+
+	for _, contrib := range resp.Contributors {
+		if contrib.Status == "online" {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // CompareAgents compares local agents with Hub agents for the current broker.
