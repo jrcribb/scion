@@ -572,6 +572,9 @@ func runBrokerStart(cmd *cobra.Command, args []string) error {
 		if brokerStartPort != DefaultBrokerPort {
 			serverArgs = append(serverArgs, fmt.Sprintf("--runtime-broker-port=%d", brokerStartPort))
 		}
+		if brokerStartAutoProvide {
+			serverArgs = append(serverArgs, "--auto-provide")
+		}
 
 		fmt.Printf("Starting broker in foreground on port %d...\n", brokerStartPort)
 		fmt.Println("Press Ctrl+C to stop.")
@@ -600,6 +603,9 @@ func runBrokerStart(cmd *cobra.Command, args []string) error {
 	daemonArgs := []string{"server", "start", "--enable-runtime-broker"}
 	if brokerStartPort != DefaultBrokerPort {
 		daemonArgs = append(daemonArgs, fmt.Sprintf("--runtime-broker-port=%d", brokerStartPort))
+	}
+	if brokerStartAutoProvide {
+		daemonArgs = append(daemonArgs, "--auto-provide")
 	}
 
 	// Start daemon

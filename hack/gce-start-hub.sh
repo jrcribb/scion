@@ -57,7 +57,7 @@ Environment=\"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\
 StandardOutput=journal
 StandardError=journal
 ExecStartPre=/usr/bin/env
-ExecStart=%s --global server start --enable-hub --enable-runtime-broker --port 9810 --runtime-broker-port 9800
+ExecStart=%s --global server start --enable-hub --enable-runtime-broker --port 9810 --runtime-broker-port 9800 --auto-provide
 Restart=always
 RestartSec=5
 

@@ -52,6 +52,9 @@ var (
 	// Testing flag to simulate remote broker behavior when running co-located
 	simulateRemoteBroker bool
 
+	// Auto-provide flag for runtime broker
+	serverAutoProvide bool
+
 	// Admin emails for bootstrapping - comma-separated list
 	adminEmails string
 )
@@ -575,10 +578,10 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 		}
 
 		// Register global grove and runtime broker
-		if err := registerGlobalGroveAndBroker(ctx, s, brokerID, brokerName, rhEndpoint, rt); err != nil {
+		if err := registerGlobalGroveAndBroker(ctx, s, brokerID, brokerName, rhEndpoint, rt, serverAutoProvide); err != nil {
 			log.Printf("Warning: failed to register global grove: %v", err)
 		} else {
-			log.Printf("Registered global grove with runtime broker %s (endpoint: %s)", brokerName, rhEndpoint)
+			log.Printf("Registered global grove with runtime broker %s (endpoint: %s, autoProvide: %v)", brokerName, rhEndpoint, serverAutoProvide)
 
 			// Start internal heartbeat loop for co-located operation.
 			// This keeps the broker marked as online in the Hub database without
@@ -618,7 +621,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 
 // registerGlobalGroveAndBroker creates the global grove and registers this
 // runtime broker as a provider. This enables automatic agent handoff.
-func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, brokerName, endpoint string, rt runtime.Runtime) error {
+func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, brokerName, endpoint string, rt runtime.Runtime, autoProvide bool) error {
 	// Check if global grove already exists
 	globalGrove, err := s.GetGroveBySlug(ctx, GlobalGroveName)
 	if err != nil && err != store.ErrNotFound {
@@ -667,6 +670,7 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 			Status:          store.BrokerStatusOnline,
 			ConnectionState: "connected",
 			Endpoint:        endpoint,
+			AutoProvide:     autoProvide,
 			Capabilities: &store.BrokerCapabilities{
 				WebPTY: false,
 				Sync:   true,
@@ -681,10 +685,11 @@ func registerGlobalGroveAndBroker(ctx context.Context, s store.Store, brokerID, 
 			return fmt.Errorf("failed to create runtime broker: %w", err)
 		}
 	} else {
-		// Update existing broker status and endpoint
+		// Update existing broker status, endpoint, and auto-provide setting
 		broker.Status = store.BrokerStatusOnline
 		broker.ConnectionState = "connected"
 		broker.Endpoint = endpoint
+		broker.AutoProvide = autoProvide
 		broker.LastHeartbeat = time.Now()
 		if err := s.UpdateRuntimeBroker(ctx, broker); err != nil {
 			return fmt.Errorf("failed to update runtime broker: %w", err)
@@ -952,6 +957,9 @@ func init() {
 
 	// Testing flags
 	serverStartCmd.Flags().BoolVar(&simulateRemoteBroker, "simulate-remote-broker", false, "Skip co-located optimizations to test full remote broker code path")
+
+	// Runtime Broker auto-provide flag
+	serverStartCmd.Flags().BoolVar(&serverAutoProvide, "auto-provide", false, "Automatically add runtime broker as provider for new groves")
 
 	// Admin bootstrap flags
 	serverStartCmd.Flags().StringVar(&adminEmails, "admin-emails", "", "Comma-separated list of email addresses to auto-promote to admin role")
