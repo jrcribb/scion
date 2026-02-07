@@ -451,9 +451,15 @@ func runHubStatus(cmd *cobra.Command, args []string) error {
 
 		health, err := client.Health(ctx)
 		if err != nil {
-			fmt.Printf("\nConnection: failed (%s)\n", err)
+			fmt.Println()
+			fmt.Println("Hub Server")
+			fmt.Println("----------")
+			fmt.Printf("Connection: failed (%s)\n", err)
 		} else {
-			fmt.Printf("\nConnection: ok\n")
+			fmt.Println()
+			fmt.Println("Hub Server")
+			fmt.Println("----------")
+			fmt.Printf("Connection: ok\n")
 			fmt.Printf("Hub Version: %s\n", health.Version)
 			fmt.Printf("Hub Status:  %s\n", health.Status)
 			fmt.Printf("Scion Version: %s\n", version.Short())
@@ -561,7 +567,15 @@ func printGroveContext(client hubclient.Client, grovePath string, isGlobal bool,
 		return
 	}
 
-	fmt.Printf("Brokers:    %d available\n", len(brokersResp.Brokers))
+	// Count only online brokers as "available"
+	onlineCount := 0
+	for _, broker := range brokersResp.Brokers {
+		if broker.Status == "online" {
+			onlineCount++
+		}
+	}
+
+	fmt.Printf("Brokers:    %d available\n", onlineCount)
 	for _, broker := range brokersResp.Brokers {
 		statusIndicator := ""
 		if broker.Status == "online" {
