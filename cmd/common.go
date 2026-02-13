@@ -390,7 +390,6 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 			if len(files) > 0 {
 				req.WorkspaceFiles = files
 				workspaceFiles = files
-				fmt.Printf("Uploading workspace (%d files)...\n", len(files))
 			}
 		}
 	}
@@ -413,7 +412,11 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 	printAutoResolvedBroker(ctx, hubCtx, runtimeBrokerID, req.RuntimeBrokerID, resp)
 
 	// Workspace bootstrap: upload files and finalize
+	if len(workspaceFiles) > 0 && len(resp.UploadURLs) == 0 {
+		fmt.Println("Using local workspace on broker.")
+	}
 	if len(resp.UploadURLs) > 0 && len(workspaceFiles) > 0 {
+		fmt.Printf("Uploading workspace (%d files)...\n", len(workspaceFiles))
 		tc := transfer.NewClient(nil)
 		uploadErr := tc.UploadFiles(ctx, workspaceFiles, resp.UploadURLs, func(file transfer.FileInfo, bytesTransferred int64) error {
 			if bytesTransferred == file.Size {

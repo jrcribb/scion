@@ -418,6 +418,97 @@ func TestCreateAgentWithWorkspaceBootstrap_NoTask(t *testing.T) {
 	}
 }
 
+func TestCreateAgentWithWorkspaceBootstrap_LocalProvider(t *testing.T) {
+	srv, s, _, disp := testBootstrapServer(t)
+	ctx := context.Background()
+
+	// Create broker and grove
+	broker := &store.RuntimeBroker{
+		ID:     "broker_local_path_test",
+		Slug:   "local-path-host",
+		Name:   "Local Path Host",
+		Status: store.BrokerStatusOnline,
+	}
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create runtime broker: %v", err)
+	}
+
+	grove := &store.Grove{
+		ID:                     "grove_local_path_test",
+		Slug:                   "local-path-grove",
+		Name:                   "Local Path Grove",
+		GitRemote:              "https://github.com/test/local-path",
+		DefaultRuntimeBrokerID: broker.ID,
+		Created:                time.Now(),
+		Updated:                time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	// Add grove provider WITH a LocalPath — this is the key difference
+	provider := &store.GroveProvider{
+		GroveID:    grove.ID,
+		BrokerID:   broker.ID,
+		BrokerName: broker.Name,
+		LocalPath:  "/home/user/project/.scion",
+		Status:     store.BrokerStatusOnline,
+	}
+	if err := s.AddGroveProvider(ctx, provider); err != nil {
+		t.Fatalf("failed to add grove provider: %v", err)
+	}
+
+	// Create an agent with workspace files and a task
+	body := CreateAgentRequest{
+		Name:    "local-workspace-agent",
+		GroveID: grove.ID,
+		Task:    "do something locally",
+		WorkspaceFiles: []transfer.FileInfo{
+			{Path: "main.go", Size: 100, Hash: "sha256:abc123"},
+			{Path: "go.mod", Size: 50, Hash: "sha256:def456"},
+		},
+	}
+
+	rec := doBootstrapRequest(t, srv, http.MethodPost, "/api/v1/agents", body)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp CreateAgentResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// Agent should be created
+	if resp.Agent == nil {
+		t.Fatal("expected agent to be set")
+	}
+
+	// No upload URLs — broker has local access
+	if len(resp.UploadURLs) != 0 {
+		t.Errorf("expected 0 upload URLs (broker has local path), got %d", len(resp.UploadURLs))
+	}
+
+	// Expires should NOT be set (no upload flow)
+	if resp.Expires != nil {
+		t.Error("expected no expires when broker has local path")
+	}
+
+	// Agent should be in provisioning status (dispatched directly)
+	if resp.Agent.Status != store.AgentStatusProvisioning {
+		t.Errorf("expected status 'provisioning', got %q", resp.Agent.Status)
+	}
+
+	// Dispatcher should have been called (direct dispatch, no finalize needed)
+	if len(disp.dispatchedAgents) != 1 {
+		t.Fatalf("expected 1 dispatched agent, got %d", len(disp.dispatchedAgents))
+	}
+	if disp.dispatchedAgents[0].ID != resp.Agent.ID {
+		t.Errorf("expected dispatched agent ID %q, got %q", resp.Agent.ID, disp.dispatchedAgents[0].ID)
+	}
+}
+
 func TestCreateAgentWithoutBootstrap(t *testing.T) {
 	srv, s, _, _ := testBootstrapServer(t)
 	groveID, _ := setupGroveAndBroker(t, s)

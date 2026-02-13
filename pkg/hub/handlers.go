@@ -411,41 +411,58 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	// Workspace bootstrap mode: if WorkspaceFiles are provided with a task,
 	// generate signed upload URLs instead of dispatching immediately.
 	// The CLI will upload files, then call finalize to trigger dispatch.
+	//
+	// Exception: if the target broker has a LocalPath for this grove, the broker
+	// can access the workspace directly from the filesystem — skip the upload
+	// and fall through to the normal dispatch path.
 	if len(req.WorkspaceFiles) > 0 && req.Task != "" {
-		stor := s.GetStorage()
-		if stor == nil {
-			RuntimeError(w, "Storage not configured for workspace bootstrap")
+		// Check if the target broker has local filesystem access to this grove
+		hasLocalPath := false
+		if runtimeBrokerID != "" {
+			provider, err := s.store.GetGroveProvider(ctx, req.GroveID, runtimeBrokerID)
+			if err == nil && provider.LocalPath != "" {
+				hasLocalPath = true
+				slog.Debug("Workspace bootstrap: broker has local path, skipping upload",
+					"broker", runtimeBrokerID, "localPath", provider.LocalPath)
+			}
+		}
+
+		if !hasLocalPath {
+			stor := s.GetStorage()
+			if stor == nil {
+				RuntimeError(w, "Storage not configured for workspace bootstrap")
+				return
+			}
+
+			storagePath := storage.WorkspaceStoragePath(agent.GroveID, agent.ID)
+			uploadURLs, existingFiles, err := generateWorkspaceUploadURLs(ctx, stor, storagePath, req.WorkspaceFiles)
+			if err != nil {
+				RuntimeError(w, "Failed to generate upload URLs: "+err.Error())
+				return
+			}
+
+			// Set agent to provisioning status (not dispatched yet)
+			agent.Status = store.AgentStatusProvisioning
+			if err := s.store.UpdateAgent(ctx, agent); err != nil {
+				slog.Warn("Failed to update agent status to provisioning", "error", err)
+			}
+
+			expires := time.Now().Add(SignedURLExpiry)
+			s.enrichAgent(ctx, agent, grove, nil)
+
+			var warnings []string
+			if len(existingFiles) > 0 {
+				slog.Debug("Workspace bootstrap: files already in storage", "count", len(existingFiles))
+			}
+
+			writeJSON(w, http.StatusCreated, CreateAgentResponse{
+				Agent:      agent,
+				Warnings:   warnings,
+				UploadURLs: uploadURLs,
+				Expires:    &expires,
+			})
 			return
 		}
-
-		storagePath := storage.WorkspaceStoragePath(agent.GroveID, agent.ID)
-		uploadURLs, existingFiles, err := generateWorkspaceUploadURLs(ctx, stor, storagePath, req.WorkspaceFiles)
-		if err != nil {
-			RuntimeError(w, "Failed to generate upload URLs: "+err.Error())
-			return
-		}
-
-		// Set agent to provisioning status (not dispatched yet)
-		agent.Status = store.AgentStatusProvisioning
-		if err := s.store.UpdateAgent(ctx, agent); err != nil {
-			slog.Warn("Failed to update agent status to provisioning", "error", err)
-		}
-
-		expires := time.Now().Add(SignedURLExpiry)
-		s.enrichAgent(ctx, agent, grove, nil)
-
-		var warnings []string
-		if len(existingFiles) > 0 {
-			slog.Debug("Workspace bootstrap: files already in storage", "count", len(existingFiles))
-		}
-
-		writeJSON(w, http.StatusCreated, CreateAgentResponse{
-			Agent:      agent,
-			Warnings:   warnings,
-			UploadURLs: uploadURLs,
-			Expires:    &expires,
-		})
-		return
 	}
 
 	// Dispatch to runtime broker if available.
