@@ -164,6 +164,7 @@ func (bas *BrokerAuthService) Close() {
 // CreateBrokerRegistrationRequest is the request body for POST /api/v1/brokers.
 type CreateBrokerRegistrationRequest struct {
 	Name         string            `json:"name"`
+	AutoProvide  bool              `json:"autoProvide,omitempty"`
 	Capabilities []string          `json:"capabilities,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 }
@@ -207,14 +208,15 @@ func (s *BrokerAuthService) CreateBrokerRegistration(ctx context.Context, req Cr
 
 	// Create the runtime broker record
 	broker := &store.RuntimeBroker{
-		ID:        brokerID,
-		Name:      req.Name,
-		Slug:      slugify(req.Name),
-		Status:    store.BrokerStatusOffline,
-		Labels:    req.Labels,
-		Created:   time.Now(),
-		Updated:   time.Now(),
-		CreatedBy: createdBy,
+		ID:          brokerID,
+		Name:        req.Name,
+		Slug:        slugify(req.Name),
+		Status:      store.BrokerStatusOffline,
+		AutoProvide: req.AutoProvide,
+		Labels:      req.Labels,
+		Created:     time.Now(),
+		Updated:     time.Now(),
+		CreatedBy:   createdBy,
 	}
 
 	if err := s.store.CreateRuntimeBroker(ctx, broker); err != nil {

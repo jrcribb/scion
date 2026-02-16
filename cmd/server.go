@@ -624,6 +624,16 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			}
 		}
 
+		// In combined hub/broker mode, default auto-provide to true unless
+		// explicitly overridden by the --auto-provide flag or settings.
+		if enableHub && !cmd.Flags().Changed("auto-provide") {
+			if vsBroker != nil && vsBroker.AutoProvide != nil {
+				serverAutoProvide = *vsBroker.AutoProvide
+			} else {
+				serverAutoProvide = true
+			}
+		}
+
 		// For co-located mode, register the broker record first, then generate
 		// in-memory credentials so the RuntimeBroker can establish a control
 		// channel to the Hub. The broker record must exist before the secret

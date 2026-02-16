@@ -202,6 +202,7 @@ type V1BrokerConfig struct {
 	BrokerName      string       `json:"broker_name,omitempty" yaml:"broker_name,omitempty" koanf:"broker_name"`
 	BrokerNickname  string       `json:"broker_nickname,omitempty" yaml:"broker_nickname,omitempty" koanf:"broker_nickname"`
 	BrokerToken     string       `json:"broker_token,omitempty" yaml:"broker_token,omitempty" koanf:"broker_token"`
+	AutoProvide     *bool        `json:"auto_provide,omitempty" yaml:"auto_provide,omitempty" koanf:"auto_provide"`
 	CORS            *V1CORSConfig `json:"cors,omitempty" yaml:"cors,omitempty" koanf:"cors"`
 }
 
