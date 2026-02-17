@@ -59,6 +59,19 @@ type HubContext struct {
 	IsGlobal  bool
 }
 
+// getHubAccessToken returns an access token for authenticating to the Hub.
+// It checks OAuth credentials first, then falls back to dev-auth tokens.
+// This mirrors the auth resolution order used by hubsync.createHubClient.
+func getHubAccessToken(endpoint string) string {
+	// Priority 1: OAuth credentials from scion hub auth login
+	if token := credentials.GetAccessToken(endpoint); token != "" {
+		return token
+	}
+
+	// Priority 2: Dev auth token
+	return apiclient.ResolveDevToken()
+}
+
 // CheckHubAvailability checks if Hub integration is enabled and returns a ready-to-use
 // Hub context if available. Returns nil if Hub should not be used (not enabled or --no-hub flag is set).
 //
@@ -506,7 +519,7 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 					if agentID == "" {
 						agentID = agentName
 					}
-					token := credentials.GetAccessToken(hubCtx.Endpoint)
+					token := getHubAccessToken(hubCtx.Endpoint)
 					if token == "" {
 						return fmt.Errorf("no access token found for Hub\n\nPlease login first: scion hub auth login")
 					}
@@ -602,7 +615,7 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 
 ready:
 	// Get access token for WebSocket authentication
-	token := credentials.GetAccessToken(hubCtx.Endpoint)
+	token := getHubAccessToken(hubCtx.Endpoint)
 	if token == "" {
 		return fmt.Errorf("no access token found for Hub\n\nPlease login first: scion hub auth login")
 	}

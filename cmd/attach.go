@@ -23,7 +23,6 @@ import (
 
 	"github.com/ptone/scion-agent/pkg/agent"
 	"github.com/ptone/scion-agent/pkg/config"
-	"github.com/ptone/scion-agent/pkg/credentials"
 	"github.com/ptone/scion-agent/pkg/runtime"
 	"github.com/ptone/scion-agent/pkg/wsclient"
 	"github.com/spf13/cobra"
@@ -142,7 +141,7 @@ func attachViaHub(hubCtx *HubContext, agentName string) error {
 	}
 
 	// Get access token for WebSocket authentication
-	token := credentials.GetAccessToken(hubCtx.Endpoint)
+	token := getHubAccessToken(hubCtx.Endpoint)
 	if token == "" {
 		return fmt.Errorf("no access token found for Hub\n\nPlease login first: scion hub auth login")
 	}
