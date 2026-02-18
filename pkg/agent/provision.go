@@ -47,6 +47,13 @@ func DeleteAgentFiles(agentName string, grovePath string, removeBranch bool) (bo
 		agentsDirs = append(agentsDirs, globalDir)
 	}
 
+	// Phase 1: worktree cleanup and tombstone collection.
+	// We complete all synchronous git operations before starting any
+	// async directory deletions, because the background goroutines can
+	// contend with git subprocess I/O on macOS/APFS (especially when
+	// the directory contains dangling symlinks that trigger autofs).
+	var dirsToDelete []string
+
 	for _, dir := range agentsDirs {
 		// Clean up tombstones from previous async deletions.
 		util.CleanupPendingDeletions(dir)
@@ -68,16 +75,15 @@ func DeleteAgentFiles(agentName string, grovePath string, removeBranch bool) (bo
 				util.Debugf("delete: worktree removal completed in %v (branch deleted: %v)", time.Since(worktreeStart), deleted)
 			} else {
 				util.Debugf("delete: worktree removal failed in %v: %v", time.Since(worktreeStart), err)
+				// Ensure the workspace directory is gone even if git worktree
+				// remove only partially succeeded, so that PruneWorktreesIn
+				// can detect the stale .git/worktrees entry.
+				_ = util.MakeWritableRecursive(agentWorkspace)
+				os.RemoveAll(agentWorkspace)
 			}
 		}
 
-		util.Debugf("delete: removing directory: %s", agentDir)
-		removeStart := time.Now()
-		if err := util.RemoveAllAsync(agentDir); err != nil {
-			util.Debugf("delete: removal failed in %v: %v", time.Since(removeStart), err)
-			return branchDeleted, fmt.Errorf("failed to remove agent directory: %w", err)
-		}
-		util.Debugf("delete: removal initiated in %v", time.Since(removeStart))
+		dirsToDelete = append(dirsToDelete, agentDir)
 	}
 
 	// Prune stale worktree records from the repo. This handles cases where the
@@ -85,7 +91,9 @@ func DeleteAgentFiles(agentName string, grovePath string, removeBranch bool) (bo
 	// incomplete cleanup) but the git worktree record was not properly unregistered.
 	if repoRoot != "" {
 		util.Debugf("delete: pruning stale worktrees in %s", repoRoot)
+		pruneStart := time.Now()
 		_ = util.PruneWorktreesIn(repoRoot)
+		util.Debugf("delete: prune completed in %v", time.Since(pruneStart))
 
 		// If the branch wasn't already deleted via RemoveWorktree (e.g. because
 		// the workspace .git file didn't exist), try to delete it by name.
@@ -96,6 +104,18 @@ func DeleteAgentFiles(agentName string, grovePath string, removeBranch bool) (bo
 				util.Debugf("delete: deleted branch %s via fallback", branchName)
 			}
 		}
+	}
+
+	// Phase 2: async directory removal. Now that all synchronous git
+	// operations are done, start the background deletions.
+	for _, agentDir := range dirsToDelete {
+		util.Debugf("delete: removing directory: %s", agentDir)
+		removeStart := time.Now()
+		if err := util.RemoveAllAsync(agentDir); err != nil {
+			util.Debugf("delete: removal failed in %v: %v", time.Since(removeStart), err)
+			return branchDeleted, fmt.Errorf("failed to remove agent directory: %w", err)
+		}
+		util.Debugf("delete: removal initiated in %v", time.Since(removeStart))
 	}
 
 	return branchDeleted, nil
