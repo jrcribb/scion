@@ -1,103 +1,139 @@
 ---
-title: Scion Templates Guide
+title: Working with Templates & Harnesses
 ---
 
-Templates are the blueprint for your agents. They define the configuration, tools, and environment that an agent will have when it starts. This guide explains how to manage and use templates effectively.
+Scion separates the **role** of an agent (what it does) from its **execution mechanics** (how it runs). This is achieved through two complementary concepts: **Templates** and **Harness-Configs**.
 
-## What is a Template?
+## Core Concepts
 
-A template in Scion is a directory containing configuration files that are copied to an agent's home directory upon creation. It includes:
+### 1. Templates (The "Role")
+A template defines the agent's purpose, personality, and instructions. It is **harness-agnostic**, meaning a "Code Reviewer" template can theoretically run on Claude, Gemini, or any other LLM.
 
-- `scion-agent.json`: The core configuration file
-- `home/`: the home folder (~) for the agent user inside the container.
+A template typically contains:
+- `scion-agent.yaml`: The agent definition (resources, env vars).
+- `agents.md`: Operational instructions for the agent.
+- `system-prompt.md`: The core persona and role definition.
+- `home/`: Optional portable configuration files (e.g., linter configs).
 
-The home folder can contain any number of unix user setups most notably:
+### 2. Harness-Configs (The "Mechanics")
+A harness-config defines the runtime environment and tool-specific settings. It includes the base files required by the underlying tool (e.g., `.claude.json` for Claude, `.gemini/settings.json` for Gemini).
 
-- `settings.json`: Harness-specific settings (e.g., tools, allowlists). This allows a Scion agent to be configured to the full extent that harness allows (see for example, [gemini](http://geminicli.com) [claude](http://claude) [codex](https://openai.com))
-- `system_prompt.md`: Instructions for the LLM. A system prompt can give the agent a stronger core sense of purpose than is possible with user-level instruction files (gemini.md, agents.md, claude.md, codex.md etc)
-- `.bashrc`: Shell customization for the agent.
+Harness-configs live in `~/.scion/harness-configs/` and contain:
+- `config.yaml`: Runtime parameters (container image, model, auth).
+- `home/`: Base files that are copied to the agent's home directory.
 
+### 3. Composition
+When you create an agent, Scion composes the final environment by layering:
+1.  **Harness-Config Base Layer**: The foundation (e.g., Gemini CLI settings).
+2.  **Template Overlay**: The role definition (prompts, instructions).
+3.  **Profile/Runtime Overrides**: User-specific tweaks.
+
+## Creating an Agent
+
+To create an agent, you specify both a template and a harness-config.
+
+```bash
+# Explicitly specify both
+scion create my-agent --template code-reviewer --harness-config gemini
+
+# Use the template's default harness-config (if defined)
+scion create my-agent --template code-reviewer
+
+# Use the system default harness-config (from settings.yaml)
+scion create my-agent --template code-reviewer
+```
+
+### Resolution Order
+Scion determines which harness-config to use in this order:
+1.  CLI flag: `--harness-config`
+2.  Template default: `default_harness_config` in `scion-agent.yaml`
+3.  System default: `default_harness_config` in global `settings.yaml`
 
 ## Managing Templates
 
-Scion provides a suite of commands to manage templates.
+### Structure of a Template
+A typical template directory looks like this:
 
-### Listing Templates
+```text
+my-template/
+├── scion-agent.yaml      # Configuration
+├── agents.md             # Instructions
+├── system-prompt.md      # Persona
+└── home/                 # Portable files (optional)
+    └── .config/
+        └── my-tool.conf
+```
 
-To see available templates (both project-specific and global):
+**`scion-agent.yaml` Example:**
+
+```yaml
+schema_version: "1"
+name: code-reviewer
+description: "Thorough code review agent"
+
+agent_instructions: agents.md
+system_prompt: system-prompt.md
+default_harness_config: gemini
+
+env:
+  REVIEW_STRICTNESS: high
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "512Mi"
+```
+
+### Template Commands
 
 ```bash
+# List available templates
 scion templates list
+
+# Create a new template
+scion templates create my-new-role
+
+# Clone an existing template
+scion templates clone code-reviewer my-custom-reviewer
+
+# Delete a template
+scion templates delete my-old-template
 ```
 
-### creating a New Template
+## Managing Harness-Configs
 
-To create a new template, specify a name and optionally the harness type (default is `gemini`):
+Harness-configs are directories stored in `~/.scion/harness-configs/` (global) or `.scion/harness-configs/` (project-level).
+
+### Customizing a Harness-Config
+To change the default model or add custom hooks for a specific harness, edit the files directly in the harness-config directory.
+
+**Example: Changing the Gemini model**
+Edit `~/.scion/harness-configs/gemini/config.yaml`:
+
+```yaml
+harness: gemini
+model: gemini-1.5-pro
+# ...
+```
+
+**Example: Adding a persistent CLI flag**
+Edit `~/.scion/harness-configs/gemini/home/.gemini/settings.json`.
+
+### Creating Variants
+You can create custom variants of harness-configs by copying the directory.
 
 ```bash
-# Create a Gemini-based template
-scion templates create security-auditor
-
-# Create a Claude-based template
-scion templates create react-expert --harness claude
-
-# Create a Codex-based template
-scion templates create codex-helper --harness codex
+cp -r ~/.scion/harness-configs/gemini ~/.scion/harness-configs/gemini-experimental
 ```
 
-This creates a new directory in `.scion/templates/security-auditor/` populated with default files.
+Now you can use this variant:
+```bash
+scion create test-agent --harness-config gemini-experimental
+```
 
-### Customizing a Template
-
-Navigate to `.scion/templates/<template-name>/` and edit the files.
-
-- **Modify `system_prompt.md`**: Give the agent a specific persona and set of instructions.
-- **Edit `scion-agent.json`**: Change environment variables, mounting volumes, or set the model.
-- **Update `settings.json`**: Configure tools and permissions specific to the harness.
-
-### Cloning a Template
-
-You can clone an existing template to use as a starting point:
+### Resetting Defaults
+If you mess up a harness-config, you can restore the factory defaults:
 
 ```bash
-scion templates clone security-auditor security-auditor-v2
+scion harness-config reset gemini
 ```
-
-### Deleting a Template
-
-To delete a template, use `scion templates delete` (or `rm`). The command checks both local and Hub locations and prompts for confirmation before deleting:
-
-```bash
-# Delete a template (will prompt for confirmation)
-scion templates delete security-auditor
-
-# Skip confirmation
-scion templates delete security-auditor --yes
-
-# Delete local only (skip Hub check)
-scion templates delete security-auditor --no-hub
-```
-
-If the template exists in both locations, you'll be prompted to choose whether to delete the local copy, the remote copy, or both.
-
-### Global vs. Project Templates
-
-- **Project Templates**: Stored in `.scion/templates/` within your project. Shared with the team via git.
-- **Global Templates**: Stored in `~/.scion/templates/`. Available across all your projects.
-
-Use the `--global` flag to operate on global templates:
-
-```bash
-scion templates list --global
-scion templates create my-global-agent --global
-```
-
-## Using Templates
-
-When starting an agent, specify the template using the `--type` or `-t` flag:
-
-```bash
-scion start auditor "Audit the login flow" --type security-auditor
-```
-
-If no type is specified, Scion defaults to the `gemini` template (if available) or another harness-specific default (like `claude`, `opencode`, or `codex`).

@@ -58,9 +58,9 @@ export default defineConfig({
 							],
 						},
 						{
-							label: 'Skills',
+							label: 'How To',
 							items: [
-								{ label: 'Templates', slug: 'guides/templates' },
+								{ label: 'Templates & Harnesses', slug: 'guides/templates' },
 								{ label: 'Tmux Sessions', slug: 'guides/tmux' },
 							],
 						},

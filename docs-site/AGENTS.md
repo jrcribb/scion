@@ -32,8 +32,8 @@ The documentation is organized into five functional pillars. The "Intersection" 
     *   Connecting to a Scion Hub.
     *   Using the Web Dashboard.
     *   Managing environment variables and secrets via the Hub.
-*   **Core Skills (Shared)**:
-    *   Advanced Template management.
+*   **How To (Shared)**:
+    *   Working with Templates & Harnesses (The new agnostic model).
     *   Interactive sessions (Attach & Message).
     *   Observability (Logs & Monitoring).
 
@@ -82,7 +82,7 @@ sidebar: [
     items: [
       { label: 'Local Workflow', items: ['install', 'guides/workspace'] },
       { label: 'Team Workflow', items: ['guides/hosted-user'] }, // To be created
-      { label: 'Skills', items: ['guides/templates', 'guides/tmux'] },
+      { label: 'How To', items: ['guides/templates', 'guides/tmux'] },
     ],
   },
   {
