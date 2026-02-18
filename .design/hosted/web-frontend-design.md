@@ -25,7 +25,7 @@ The Scion Web Frontend provides a browser-based dashboard for managing agents, g
 | **Server** | Koa 2.x | Lightweight Node.js web framework |
 | **SSR** | @lit-labs/ssr | Server-side rendering for Lit components |
 | **Terminal** | xterm.js | PTY display in browser |
-| **Real-time** | SSE + NATS | Server-Sent Events backed by NATS pub/sub |
+| **Real-time** | SSE + NATS | Server-Sent Events backed by NATS pub/sub (state); WebSocket for PTY only |
 | **Build** | Vite | Fast builds with ES modules |
 | **Deployment** | Cloud Run | Serverless container hosting |
 
@@ -263,12 +263,13 @@ This pattern provides efficient real-time updates with minimal data transfer:
 
 2. **Hydration:**
    - Lit components hydrate (become interactive)
-   - Client opens SSE connection to `/events` endpoint
-   - Server assigns a subscription ID
+   - Client opens SSE connection to `/events?sub=...` with view-scoped subscription subjects as query parameters
+   - Server subscribes to the declared NATS subjects for this connection
 
 3. **Live Wire (NATS):**
-   - Koa server subscribes to NATS subjects based on client context
-   - Example subjects: `grove.{groveId}.agent.*`, `agent.{agentId}.status`
+   - Koa server subscribes to NATS subjects declared in the SSE connection's query parameters
+   - Subject scope matches the current view (see Section 12.2 for subscription tiers)
+   - Example: grove view subscribes to `grove.{groveId}.>`, agent detail adds `agent.{agentId}.>`
 
 4. **Side-Effect Trigger:**
    - Hub API publishes to NATS when database changes occur
@@ -501,6 +502,8 @@ export function getHtmlTemplate(opts: HtmlTemplateOptions): string {
 
 ### 3.4 SSE Manager
 
+Subscriptions are declared at connection creation time (via query parameters on the SSE endpoint). There is no in-band subscription mutation — the client closes the connection and opens a new one when navigating to a different view scope. This keeps each connection stateless and maps directly to the future gRPC `WatchRequest` pattern.
+
 ```typescript
 // src/server/services/sse-manager.ts
 import { PassThrough } from 'stream';
@@ -510,7 +513,7 @@ interface SSEConnection {
   id: string;
   stream: PassThrough;
   userId: string;
-  subscriptions: Set<string>;
+  subjects: string[];
   lastEventId: number;
 }
 
@@ -522,7 +525,13 @@ export class SSEManager {
     this.natsClient = natsClient;
   }
 
-  createConnection(userId: string): SSEConnection {
+  // Create a connection with all subscriptions declared upfront.
+  // Subjects are immutable for the lifetime of the connection.
+  async createConnection(
+    userId: string,
+    subjects: string[],
+    resumeFrom: number = 0
+  ): Promise<SSEConnection> {
     const id = crypto.randomUUID();
     const stream = new PassThrough();
 
@@ -530,38 +539,30 @@ export class SSEManager {
       id,
       stream,
       userId,
-      subscriptions: new Set(),
-      lastEventId: 0
+      subjects,
+      lastEventId: resumeFrom
     };
 
     this.connections.set(id, conn);
 
-    // Send initial connection event
-    this.sendEvent(conn, 'connected', { connectionId: id });
-
-    return conn;
-  }
-
-  async subscribe(
-    connId: string,
-    subject: string,
-    filter?: (data: unknown) => boolean
-  ): Promise<void> {
-    const conn = this.connections.get(connId);
-    if (!conn) return;
-
-    conn.subscriptions.add(subject);
-
-    // Subscribe to NATS subject
-    await this.natsClient.subscribe(subject, (data) => {
-      if (!filter || filter(data)) {
+    // Subscribe to all NATS subjects for this connection
+    for (const subject of subjects) {
+      await this.natsClient.subscribe(subject, (data, natsSubject) => {
         this.sendEvent(conn, 'update', {
-          subject,
+          subject: natsSubject,
           data,
           timestamp: Date.now()
         });
-      }
+      });
+    }
+
+    // Send initial connection event
+    this.sendEvent(conn, 'connected', {
+      connectionId: id,
+      subjects
     });
+
+    return conn;
   }
 
   private sendEvent(conn: SSEConnection, type: string, data: unknown): void {
@@ -577,7 +578,7 @@ export class SSEManager {
     if (!conn) return;
 
     // Unsubscribe from all NATS subjects
-    conn.subscriptions.forEach(subject => {
+    conn.subjects.forEach(subject => {
       this.natsClient.unsubscribe(subject);
     });
 
@@ -958,13 +959,15 @@ export class AgentCard extends LitElement {
 
 ### 4.3 SSE Client
 
+Subscriptions are declared as query parameters on the SSE endpoint URL. To change subscriptions (e.g., on navigation), the client closes the current connection and opens a new one with different parameters. There is no in-band subscription mutation.
+
 ```typescript
 // src/client/sse-client.ts
 
-export interface SSEEvent {
-  type: string;
+export interface SSEUpdateEvent {
+  subject: string;
   data: unknown;
-  id: string;
+  timestamp: number;
 }
 
 export class SSEClient extends EventTarget {
@@ -972,28 +975,37 @@ export class SSEClient extends EventTarget {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private reconnectDelay = 1000;
+  private subjects: string[] = [];
 
-  constructor(private url: string) {
-    super();
+  // Build the SSE URL with subscription subjects as query params.
+  // Maps to the future gRPC WatchRequest pattern.
+  private buildUrl(subjects: string[]): string {
+    const params = subjects.map(s => `sub=${encodeURIComponent(s)}`).join('&');
+    return `/events?${params}`;
   }
 
-  connect(): void {
-    this.eventSource = new EventSource(this.url, {
+  // Open a connection scoped to the given subjects.
+  // Closes any existing connection first.
+  connect(subjects: string[]): void {
+    this.disconnect();
+    this.subjects = subjects;
+    this.reconnectAttempts = 0;
+
+    const url = this.buildUrl(subjects);
+    this.eventSource = new EventSource(url, {
       withCredentials: true
     });
 
     this.eventSource.onopen = () => {
-      console.log('SSE connected');
       this.reconnectAttempts = 0;
       this.dispatchEvent(new CustomEvent('connected'));
     };
 
-    this.eventSource.onerror = (error) => {
-      console.error('SSE error:', error);
+    this.eventSource.onerror = () => {
       this.handleReconnect();
     };
 
-    // Handle custom event types
+    // Handle state update events
     this.eventSource.addEventListener('update', (event) => {
       const data = JSON.parse((event as MessageEvent).data);
       this.dispatchEvent(new CustomEvent('update', { detail: data }));
@@ -1001,7 +1013,7 @@ export class SSEClient extends EventTarget {
 
     this.eventSource.addEventListener('connected', (event) => {
       const data = JSON.parse((event as MessageEvent).data);
-      console.log('SSE connection ID:', data.connectionId);
+      console.log('SSE connection:', data.connectionId, 'subjects:', data.subjects);
     });
   }
 
@@ -1013,22 +1025,13 @@ export class SSEClient extends EventTarget {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-      console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
-      setTimeout(() => this.connect(), delay);
+      // Reconnect with same subjects (EventSource also handles
+      // Last-Event-ID automatically for resume)
+      setTimeout(() => this.connect(this.subjects), delay);
     } else {
       this.dispatchEvent(new CustomEvent('disconnected'));
     }
-  }
-
-  subscribe(subjects: string[]): void {
-    // Send subscription request to server
-    fetch('/events/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subjects }),
-      credentials: 'include'
-    });
   }
 
   disconnect(): void {
@@ -1042,31 +1045,39 @@ export class SSEClient extends EventTarget {
 
 ### 4.4 Reactive State Management
 
+The StateManager uses **view-scoped subscriptions** — the subscription scope follows navigation, not individual entities. When the user navigates from a grove list to a grove detail view, the SSE connection is closed and reopened with different subject parameters. The StateManager maintains a full in-memory state map for whatever scope is active; pagination only affects which slice is rendered, not what is subscribed to.
+
 ```typescript
 // src/client/state.ts
-import { SSEClient } from './sse-client';
+import { SSEClient, SSEUpdateEvent } from './sse-client';
+
+// Subscription scope matches view context
+export type ViewScope =
+  | { type: 'dashboard' }
+  | { type: 'grove'; groveId: string }
+  | { type: 'agent-detail'; groveId: string; agentId: string };
 
 export interface AppState {
   agents: Map<string, Agent>;
   groves: Map<string, Grove>;
   connected: boolean;
+  scope: ViewScope | null;
 }
 
 export class StateManager extends EventTarget {
   private state: AppState = {
     agents: new Map(),
     groves: new Map(),
-    connected: false
+    connected: false,
+    scope: null
   };
 
-  private sseClient: SSEClient;
+  private sseClient = new SSEClient();
 
   constructor() {
     super();
-    this.sseClient = new SSEClient('/events');
 
-    // Handle SSE updates
-    this.sseClient.addEventListener('update', ((event: CustomEvent) => {
+    this.sseClient.addEventListener('update', ((event: CustomEvent<SSEUpdateEvent>) => {
       this.handleUpdate(event.detail);
     }) as EventListener);
 
@@ -1096,56 +1107,57 @@ export class StateManager extends EventTarget {
     }
   }
 
-  connect(): void {
-    this.sseClient.connect();
+  // Set the view scope. This closes any existing SSE connection
+  // and opens a new one with subjects matching the view context.
+  // Called by the router on navigation.
+  setScope(scope: ViewScope): void {
+    this.state.scope = scope;
+    const subjects = this.subjectsForScope(scope);
+    this.sseClient.connect(subjects);
   }
 
-  // Subscribe to specific resources
-  watchAgents(groveId?: string): void {
-    const subject = groveId
-      ? `grove.${groveId}.agent.*`
-      : 'agent.*';
-    this.sseClient.subscribe([subject]);
-  }
+  // Map view scope to NATS subject patterns.
+  // Matches the subscription tiers defined in Section 12.2.
+  private subjectsForScope(scope: ViewScope): string[] {
+    switch (scope.type) {
+      case 'dashboard':
+        return ['grove.*.summary'];
 
-  watchAgent(agentId: string): void {
-    this.sseClient.subscribe([`agent.${agentId}.*`]);
+      case 'grove':
+        // Grove-level wildcard receives all lightweight/medium events
+        // for agents within this grove, plus grove metadata changes.
+        return [`grove.${scope.groveId}.>`];
+
+      case 'agent-detail':
+        // Keep grove subscription for breadcrumb/sidebar freshness.
+        // Add agent-specific subscription for heavy events (harness output).
+        return [
+          `grove.${scope.groveId}.>`,
+          `agent.${scope.agentId}.>`
+        ];
+    }
   }
 
   // Handle delta updates from SSE
-  private handleUpdate(update: { subject: string; data: unknown }): void {
+  private handleUpdate(update: SSEUpdateEvent): void {
     const { subject, data } = update;
-
-    // Parse subject to determine update type
-    // e.g., "agent.abc123.status" or "grove.xyz.agent.created"
     const parts = subject.split('.');
 
     if (parts[0] === 'agent') {
-      const agentId = parts[1];
-      const eventType = parts[2];
-
-      if (eventType === 'deleted') {
-        this.state.agents.delete(agentId);
-      } else {
-        // Merge delta into existing agent
-        const existing = this.state.agents.get(agentId) || {} as Agent;
-        const updated = { ...existing, ...(data as Partial<Agent>) };
-        this.state.agents.set(agentId, updated);
-      }
-
-      this.notify('agents-updated');
+      this.handleAgentEvent(parts[1], parts[2], data);
     }
 
     if (parts[0] === 'grove') {
       const groveId = parts[1];
-
       if (parts[2] === 'agent') {
-        // Agent within grove updated
-        const agentData = data as Agent;
-        this.state.agents.set(agentData.id, agentData);
-        this.notify('agents-updated');
+        // Agent event within grove: grove.{groveId}.agent.{eventType}
+        this.handleAgentEvent(
+          (data as { agentId: string }).agentId,
+          parts[3],
+          data
+        );
       } else {
-        // Grove itself updated
+        // Grove metadata event
         const existing = this.state.groves.get(groveId) || {} as Grove;
         const updated = { ...existing, ...(data as Partial<Grove>) };
         this.state.groves.set(groveId, updated);
@@ -1154,11 +1166,28 @@ export class StateManager extends EventTarget {
     }
   }
 
+  private handleAgentEvent(agentId: string, eventType: string, data: unknown): void {
+    if (eventType === 'deleted') {
+      this.state.agents.delete(agentId);
+    } else {
+      // Merge delta into existing agent state
+      const existing = this.state.agents.get(agentId) || {} as Agent;
+      const updated = { ...existing, ...(data as Partial<Agent>) };
+      this.state.agents.set(agentId, updated);
+    }
+    this.notify('agents-updated');
+  }
+
   private notify(event: string): void {
     this.dispatchEvent(new CustomEvent(event, { detail: this.state }));
   }
 
-  // Getters
+  disconnect(): void {
+    this.sseClient.disconnect();
+  }
+
+  // Getters — the full state map is maintained regardless of pagination.
+  // Components render the slice they need.
   getAgents(): Agent[] {
     return Array.from(this.state.agents.values());
   }
@@ -2493,26 +2522,137 @@ export class ApiKeys extends LitElement {
 
 ## 12. NATS Integration
 
-### 12.1 NATS Subject Schema
+### 12.1 Transport Design: SSE for State, WebSocket for PTY
 
-The Hub API publishes events to NATS when database changes occur. The Web Frontend subscribes to relevant subjects based on user context.
+State updates use **Server-Sent Events (SSE)** rather than WebSocket. WebSocket is reserved for the terminal/PTY binary data stream only.
 
-| Subject Pattern | Description | Payload |
-|-----------------|-------------|---------|
-| `agent.{agentId}.status` | Agent status change | `{ status, sessionStatus, containerStatus }` |
-| `agent.{agentId}.event` | Agent event (harness) | `StatusEvent` |
-| `agent.{agentId}.created` | Agent created | Full `Agent` object |
-| `agent.{agentId}.deleted` | Agent deleted | `{ agentId }` |
-| `grove.{groveId}.agent.created` | Agent created in grove | Full `Agent` object |
-| `grove.{groveId}.agent.deleted` | Agent deleted from grove | `{ agentId }` |
-| `grove.{groveId}.updated` | Grove metadata changed | `{ name?, labels?, ... }` |
-| `grove.{groveId}.broker.connected` | Broker joined grove | `{ brokerId, brokerName }` |
-| `grove.{groveId}.broker.disconnected` | Broker left grove | `{ brokerId }` |
-| `broker.{brokerId}.status` | Broker status change | `{ status, resources }` |
+**Rationale:**
 
-### 12.2 Hub-Side Publishing
+- State updates are inherently **server-to-client unidirectional**. The client sends commands via REST (`POST /api/agents/:id/stop`), not through the event stream. SSE matches this topology directly.
+- The `EventSource` API provides **automatic reconnection** with `lastEventId` resume, which the client gets for free.
+- SSE streams are regular HTTP responses that pass through CDNs, load balancers, and Cloud Run without special WebSocket upgrade configuration.
+- SSE maps directly to a **gRPC server-streaming RPC**, which is the intended future transport. A WebSocket approach would map to a bidirectional stream — more complex operationally without benefit, since the client-to-server direction would be unused for state.
 
-The Hub API publishes events after successful database operations:
+**Future gRPC mapping:**
+
+```protobuf
+// The SSE /events endpoint maps directly to this server-streaming RPC
+rpc WatchResources(WatchRequest) returns (stream WatchEvent);
+
+message WatchRequest {
+  repeated string subjects = 1;    // NATS-style subject patterns
+  string resume_token = 2;         // maps to SSE lastEventId
+}
+
+message WatchEvent {
+  string subject = 1;
+  string event_type = 2;           // "status", "created", "deleted", "event"
+  bytes payload = 3;
+  int64 sequence = 4;              // maps to SSE id
+  int64 timestamp = 5;
+}
+```
+
+### 12.2 View-Scoped Subscription Model
+
+The subscription unit is the **view context**, not the individual entity. A paginated agent list showing page 3 of 20 does not subscribe to each visible agent individually — it subscribes at the grove level and maintains a full in-memory state map. Pagination is a rendering concern, not a data concern.
+
+#### Subscription Tiers
+
+| View | SSE Endpoint | NATS Subjects | Event Weight |
+|------|-------------|---------------|--------------|
+| Dashboard / Grove list | `GET /events?sub=grove.*.summary` | Aggregate stats per grove | Lightweight |
+| Grove detail / Agent list | `GET /events?sub=grove.{groveId}.>` | All agent events within the grove | Lightweight to Medium |
+| Agent detail | `GET /events?sub=grove.{groveId}.>&sub=agent.{agentId}.>` | Grove context + full agent event stream | All weights |
+| Terminal | `GET /events?sub=agent.{agentId}.>` | Agent events (PTY data uses separate WebSocket) | All weights |
+
+Subscription changes happen on **navigation events**, not on pagination or scroll. This keeps subscription churn at human-interaction frequency (seconds to minutes between transitions).
+
+#### Subscription Lifecycle
+
+```
+User lands on /groves
+  → open SSE: /events?sub=grove.*.summary
+
+User clicks into /groves/abc
+  → close previous SSE connection
+  → open SSE: /events?sub=grove.abc.>
+
+User clicks into /agents/xyz (within grove abc)
+  → close previous SSE connection
+  → open SSE: /events?sub=grove.abc.>&sub=agent.xyz.>
+  (grove subscription kept for breadcrumb/sidebar freshness)
+
+User navigates back to /groves/abc
+  → close previous SSE connection
+  → open SSE: /events?sub=grove.abc.>
+
+User navigates to /groves/def
+  → close previous SSE connection
+  → open SSE: /events?sub=grove.def.>
+```
+
+Closing and reopening the SSE connection on navigation (rather than mutating subscriptions in-band) keeps the server stateless per-connection and maps directly to making a new gRPC `WatchRequest` call.
+
+#### Event Weight Classes
+
+Not all events carry the same payload cost. The NATS subject hierarchy controls which weight class a subscriber receives based on their subscription scope.
+
+| Weight | Subject Pattern | Payload Size | Example |
+|--------|----------------|-------------|---------|
+| **Lightweight** | `grove.{groveId}.agent.status` | ~100 bytes | `{ agentId, status, sessionStatus }` |
+| **Lightweight** | `grove.{groveId}.agent.deleted` | ~50 bytes | `{ agentId }` |
+| **Medium** | `grove.{groveId}.agent.created` | ~500 bytes | `{ agentId, name, template, status }` |
+| **Medium** | `agent.{agentId}.metrics` | ~200 bytes | `{ cpu, memory, tokens }` |
+| **Heavy** | `agent.{agentId}.event` | 1-10 KB | Full `StatusEvent` with harness output |
+
+The Hub publishes to **both** grove-scoped and agent-scoped subjects for status changes (dual-publish). Heavy events like `agent.{agentId}.event` are published **only** to the agent-specific subject. This means subscribing at the grove level via `grove.{groveId}.>` automatically filters out heavy payloads — the grove-level wildcard only receives events published to `grove.{groveId}.*` subjects.
+
+#### Scalability
+
+For a grove with 500 agents, `grove.{groveId}.>` carries all lightweight status changes. At one status change per agent per minute (a high estimate), that is ~8 events/second at ~100 bytes each — under 1 KB/s on the SSE stream. If thousands of agents with high-frequency events become a concern, a server-side aggregation tier can batch grove-level events into periodic consolidated snapshots (e.g., every 2 seconds). This is an optimization to add later, not something to design in now.
+
+#### Design Constraints
+
+- **Do not use viewport-aware subscriptions.** Subscribing to only the visible agents in a paginated list causes subscription churn on every page change and stale data when paging back. The grove-level subscription is cheaper.
+- **Do not use a single global subscription.** Subscribing to `>` (everything) pushes events for groves the user has no interest in and requires server-side permission filtering on every message.
+- **Do not mutate subscriptions in-band.** Close the SSE connection and open a new one with updated query parameters on navigation. This keeps the server stateless per-connection and maps directly to the future gRPC `WatchRequest` pattern.
+
+### 12.3 NATS Subject Schema
+
+The Hub API publishes events to NATS when database changes occur. The Web Frontend subscribes to relevant subjects based on view context.
+
+#### Grove-Scoped Subjects (Lightweight/Medium events)
+
+| Subject Pattern | Description | Payload | Weight |
+|-----------------|-------------|---------|--------|
+| `grove.{groveId}.agent.status` | Agent status change within grove | `{ agentId, status, sessionStatus, containerStatus }` | Lightweight |
+| `grove.{groveId}.agent.created` | Agent created in grove | `{ agentId, name, template, status }` | Medium |
+| `grove.{groveId}.agent.deleted` | Agent deleted from grove | `{ agentId }` | Lightweight |
+| `grove.{groveId}.updated` | Grove metadata changed | `{ name?, labels?, ... }` | Lightweight |
+| `grove.{groveId}.broker.connected` | Broker joined grove | `{ brokerId, brokerName }` | Lightweight |
+| `grove.{groveId}.broker.disconnected` | Broker left grove | `{ brokerId }` | Lightweight |
+| `grove.*.summary` | Periodic grove summary (dashboard) | `{ groveId, agentCounts, status }` | Lightweight |
+
+#### Agent-Scoped Subjects (All weights, detail views only)
+
+| Subject Pattern | Description | Payload | Weight |
+|-----------------|-------------|---------|--------|
+| `agent.{agentId}.status` | Agent status change | `{ status, sessionStatus, containerStatus }` | Lightweight |
+| `agent.{agentId}.event` | Agent event (harness output) | Full `StatusEvent` | Heavy |
+| `agent.{agentId}.metrics` | Resource usage, token counts | `{ cpu, memory, tokens }` | Medium |
+| `agent.{agentId}.created` | Agent created | Full `Agent` object | Medium |
+| `agent.{agentId}.deleted` | Agent deleted | `{ agentId }` | Lightweight |
+
+#### Broker-Scoped Subjects
+
+| Subject Pattern | Description | Payload | Weight |
+|-----------------|-------------|---------|--------|
+| `broker.{brokerId}.status` | Broker status change | `{ status, resources }` | Lightweight |
+
+### 12.4 Hub-Side Publishing
+
+The Hub API publishes events after successful database operations. Status changes are dual-published to both grove-scoped and agent-scoped subjects so that grove-level subscribers receive lightweight deltas without needing per-agent subscriptions. Heavy events (harness output) are published only to agent-scoped subjects.
 
 ```go
 // pkg/hub/service/agent_service.go
@@ -2523,8 +2663,9 @@ func (s *AgentService) UpdateStatus(ctx context.Context, agentID string, status 
         return err
     }
 
-    // Publish to NATS
     agent, _ := s.store.GetAgent(ctx, agentID)
+
+    // Publish to agent-scoped subject (detail subscribers)
     s.nats.Publish(fmt.Sprintf("agent.%s.status", agentID), map[string]interface{}{
         "status":          status.Status,
         "sessionStatus":   status.SessionStatus,
@@ -2532,7 +2673,8 @@ func (s *AgentService) UpdateStatus(ctx context.Context, agentID string, status 
         "timestamp":       time.Now().UTC(),
     })
 
-    // Also publish to grove subject for grove-level subscribers
+    // Dual-publish to grove-scoped subject (list/grove subscribers)
+    // Includes agentId so grove-level subscribers can identify the source
     s.nats.Publish(fmt.Sprintf("grove.%s.agent.status", agent.GroveID), map[string]interface{}{
         "agentId":         agentID,
         "status":          status.Status,
@@ -2543,22 +2685,64 @@ func (s *AgentService) UpdateStatus(ctx context.Context, agentID string, status 
 
     return nil
 }
+
+// Heavy events are NOT dual-published to grove scope
+func (s *AgentService) PublishHarnessEvent(ctx context.Context, agentID string, event StatusEvent) error {
+    // Only publish to agent-scoped subject
+    // Grove-level subscribers do not receive these
+    s.nats.Publish(fmt.Sprintf("agent.%s.event", agentID), event)
+    return nil
+}
 ```
 
-### 12.3 Web Frontend Subscription Logic
+### 12.5 Web Frontend SSE Endpoint
+
+The SSE endpoint accepts subscription subjects as query parameters. Each SSE connection is scoped to the subjects declared at connection time. To change subscriptions, the client closes the connection and opens a new one — there is no in-band subscription mutation.
 
 ```typescript
 // src/server/routes/sse.ts
 import Router from '@koa/router';
 import { Context } from 'koa';
-import { sseManager } from '../services/sse-manager';
+import { SSEManager } from '../services/sse-manager';
 
 const router = new Router();
 
-// Main SSE endpoint
+// SSE endpoint with query-param subscriptions (WatchRequest pattern)
+// Usage: GET /events?sub=grove.abc.>&sub=agent.xyz.>
 router.get('/', async (ctx: Context) => {
-  // Create SSE connection
-  const conn = sseManager.createConnection(ctx.state.user.id);
+  const subjects = Array.isArray(ctx.query.sub)
+    ? ctx.query.sub as string[]
+    : ctx.query.sub ? [ctx.query.sub as string] : [];
+
+  if (subjects.length === 0) {
+    ctx.status = 400;
+    ctx.body = { error: 'At least one sub parameter is required' };
+    return;
+  }
+
+  // Validate all subjects against user permissions
+  const allowedSubjects = subjects.filter(subject =>
+    canSubscribe(ctx.state.user, subject)
+  );
+
+  if (allowedSubjects.length === 0) {
+    ctx.status = 403;
+    ctx.body = { error: 'No permitted subjects' };
+    return;
+  }
+
+  // Resume support: client can pass Last-Event-ID header for reconnection
+  const lastEventId = ctx.headers['last-event-id']
+    ? parseInt(ctx.headers['last-event-id'] as string, 10)
+    : 0;
+
+  // Create SSE connection with all subscriptions declared upfront
+  const sseManager: SSEManager = ctx.state.sseManager;
+  const conn = await sseManager.createConnection(
+    ctx.state.user.id,
+    allowedSubjects,
+    lastEventId
+  );
 
   // Set SSE headers
   ctx.set({
@@ -2577,33 +2761,16 @@ router.get('/', async (ctx: Context) => {
   });
 });
 
-// Subscribe to specific subjects
-router.post('/subscribe', async (ctx: Context) => {
-  const { connectionId, subjects } = ctx.request.body as {
-    connectionId: string;
-    subjects: string[];
-  };
-
-  // Validate subjects against user permissions
-  const allowedSubjects = subjects.filter(subject =>
-    canSubscribe(ctx.state.user, subject)
-  );
-
-  for (const subject of allowedSubjects) {
-    await sseManager.subscribe(connectionId, subject);
-  }
-
-  ctx.body = { subscribed: allowedSubjects };
-});
-
 function canSubscribe(user: User, subject: string): boolean {
-  // Check if user has permission to subscribe to this subject
-  // e.g., can only subscribe to groves they have access to
   const parts = subject.split('.');
+
+  // Dashboard summary is available to all authenticated users
+  if (subject === 'grove.*.summary') {
+    return true;
+  }
 
   if (parts[0] === 'grove') {
     const groveId = parts[1];
-    // Check grove access (implementation depends on your auth model)
     return userHasGroveAccess(user, groveId);
   }
 
