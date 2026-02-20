@@ -60,7 +60,7 @@ var stopCmd = &cobra.Command{
 			return err
 		}
 
-		_ = agent.UpdateAgentConfig(agentName, grovePath, "stopped", "", "", "")
+		_ = agent.UpdateAgentConfig(agentName, grovePath, "stopped", "", "")
 
 		if stopRm {
 			if _, err := mgr.Delete(context.Background(), agentName, true, grovePath, false); err != nil {

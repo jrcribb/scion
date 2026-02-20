@@ -75,7 +75,6 @@ func (m *AgentManager) List(ctx context.Context, filter map[string]string) ([]ap
 				var info api.AgentInfo
 				if err := json.Unmarshal(data, &info); err == nil {
 					agents[i].Status = info.Status
-					agents[i].SessionStatus = info.SessionStatus
 					if agents[i].Runtime == "" {
 						agents[i].Runtime = info.Runtime
 					}
@@ -100,9 +99,6 @@ func (m *AgentManager) List(ctx context.Context, filter map[string]string) ([]ap
 				if err := json.Unmarshal(data, &cfg); err == nil && cfg.Info != nil {
 					if agents[i].Status == "" {
 						agents[i].Status = cfg.Info.Status
-					}
-					if agents[i].SessionStatus == "" {
-						agents[i].SessionStatus = cfg.Info.SessionStatus
 					}
 					if agents[i].Runtime == "" {
 						agents[i].Runtime = cfg.Info.Runtime
@@ -186,7 +182,6 @@ func (m *AgentManager) List(ctx context.Context, filter map[string]string) ([]ap
 				ContainerStatus: "created",
 				Image:           info.Image,
 				Status:          info.Status,
-				SessionStatus:   info.SessionStatus,
 				Runtime:         info.Runtime,
 				Profile:         info.Profile,
 			}

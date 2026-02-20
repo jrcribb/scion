@@ -206,7 +206,7 @@ func (s *HeartbeatService) gatherGroveAgents() []hubclient.GroveHeartbeat {
 
 		agentHB := hubclient.AgentHeartbeat{
 			Slug:            ag.Name, // Use Name as the slug identifier
-			Status:          ag.SessionStatus,
+			Status:          ag.Status,
 			ContainerStatus: ag.ContainerStatus,
 		}
 		groveMap[groveID] = append(groveMap[groveID], agentHB)

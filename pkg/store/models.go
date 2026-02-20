@@ -38,10 +38,9 @@ type Agent struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 
 	// Status
-	Status          string `json:"status"`                    // provisioning, running, stopped, error
+	Status          string `json:"status"`                    // provisioning, running, stopped, error, busy, idle, waiting_for_input, completed
 	ConnectionState string `json:"connectionState,omitempty"` // connected, disconnected, unknown
 	ContainerStatus string `json:"containerStatus,omitempty"` // Container-level status
-	SessionStatus   string `json:"sessionStatus,omitempty"`   // started, waiting, completed
 	RuntimeState    string `json:"runtimeState,omitempty"`    // Low-level runtime state
 
 	// Runtime configuration
@@ -104,13 +103,17 @@ type AgentAppliedConfig struct {
 
 // AgentStatus constants
 const (
-	AgentStatusCreated      = "created"
-	AgentStatusCloning      = "cloning"
-	AgentStatusProvisioning = "provisioning"
-	AgentStatusRunning      = "running"
-	AgentStatusStopped      = "stopped"
-	AgentStatusError        = "error"
-	AgentStatusPending      = "pending"
+	AgentStatusCreated         = "created"
+	AgentStatusCloning         = "cloning"
+	AgentStatusProvisioning    = "provisioning"
+	AgentStatusRunning         = "running"
+	AgentStatusStopped         = "stopped"
+	AgentStatusError           = "error"
+	AgentStatusPending         = "pending"
+	AgentStatusBusy            = "busy"
+	AgentStatusIdle            = "idle"
+	AgentStatusWaitingForInput = "waiting_for_input"
+	AgentStatusCompleted       = "completed"
 )
 
 // Grove represents a project/agent group in the Hub database.
@@ -713,7 +716,6 @@ func (a *Agent) ToAPI() *api.AgentInfo {
 		// Status
 		Status:          a.Status,
 		ContainerStatus: a.ContainerStatus,
-		SessionStatus:   a.SessionStatus,
 		RuntimeState:    a.RuntimeState,
 
 		// Runtime configuration

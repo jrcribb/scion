@@ -25,21 +25,19 @@ func TestStatusHandler_UpdateStatus(t *testing.T) {
 	}
 
 	// Test updating status
-	err := h.UpdateStatus(hooks.StateThinking, false)
+	err := h.UpdateStatus(hooks.StateThinking)
 	require.NoError(t, err)
 
 	// Verify file contents
 	info := readAgentInfo(t, statusPath)
 	assert.Equal(t, "THINKING", info.Status)
-	assert.Empty(t, info.SessionStatus)
 
-	// Test updating session status
-	err = h.UpdateStatus(hooks.StateWaitingForInput, true)
+	// Test updating to sticky status (WAITING_FOR_INPUT)
+	err = h.UpdateStatus(hooks.StateWaitingForInput)
 	require.NoError(t, err)
 
 	info = readAgentInfo(t, statusPath)
-	assert.Equal(t, "THINKING", info.Status) // Previous status preserved
-	assert.Equal(t, "WAITING_FOR_INPUT", info.SessionStatus)
+	assert.Equal(t, "WAITING_FOR_INPUT", info.Status)
 }
 
 func TestStatusHandler_Handle(t *testing.T) {
@@ -113,62 +111,50 @@ func TestStatusHandler_Handle(t *testing.T) {
 	}
 }
 
-func TestStatusHandler_ClearWaitingStatus(t *testing.T) {
+func TestStatusHandler_StickyWaitingClearedByToolStart(t *testing.T) {
 	tmpDir := t.TempDir()
 	statusPath := filepath.Join(tmpDir, "agent-info.json")
 
 	h := &StatusHandler{StatusPath: statusPath}
 
-	// Set sessionStatus to WAITING_FOR_INPUT
-	err := h.UpdateStatus(hooks.StateWaitingForInput, true)
+	// Set status to WAITING_FOR_INPUT (sticky)
+	err := h.UpdateStatus(hooks.StateWaitingForInput)
 	require.NoError(t, err)
 
 	// Verify it's set
 	info := readAgentInfo(t, statusPath)
-	assert.Equal(t, "WAITING_FOR_INPUT", info.SessionStatus)
+	assert.Equal(t, "WAITING_FOR_INPUT", info.Status)
 
-	// Clear it
-	err = h.ClearWaitingStatus()
+	// Tool-start should clear WAITING_FOR_INPUT (user has responded)
+	err = h.Handle(&hooks.Event{
+		Name: hooks.EventToolStart,
+		Data: hooks.EventData{ToolName: "Bash"},
+	})
 	require.NoError(t, err)
 
 	info = readAgentInfo(t, statusPath)
-	assert.Empty(t, info.SessionStatus)
+	assert.Equal(t, "EXECUTING", info.Status, "tool-start should clear WAITING_FOR_INPUT")
 }
 
-func TestStatusHandler_ClearWaitingStatus_NoOpWhenNotWaiting(t *testing.T) {
+func TestStatusHandler_StickyCompletedNotClearedByToolStart(t *testing.T) {
 	tmpDir := t.TempDir()
 	statusPath := filepath.Join(tmpDir, "agent-info.json")
 
 	h := &StatusHandler{StatusPath: statusPath}
 
-	// Set sessionStatus to COMPLETED
-	err := h.UpdateStatus(hooks.StateCompleted, true)
+	// Set status to COMPLETED (sticky)
+	err := h.UpdateStatus(hooks.StateCompleted)
 	require.NoError(t, err)
 
-	// ClearWaitingStatus should not clear COMPLETED
-	err = h.ClearWaitingStatus()
-	require.NoError(t, err)
-
-	info := readAgentInfo(t, statusPath)
-	assert.Equal(t, "COMPLETED", info.SessionStatus)
-}
-
-func TestStatusHandler_ClearWaitingStatus_NoOpWhenEmpty(t *testing.T) {
-	tmpDir := t.TempDir()
-	statusPath := filepath.Join(tmpDir, "agent-info.json")
-
-	h := &StatusHandler{StatusPath: statusPath}
-
-	// Set operational status only
-	err := h.UpdateStatus(hooks.StateThinking, false)
-	require.NoError(t, err)
-
-	// ClearWaitingStatus should be a no-op
-	err = h.ClearWaitingStatus()
+	// Tool-start should NOT clear COMPLETED
+	err = h.Handle(&hooks.Event{
+		Name: hooks.EventToolStart,
+		Data: hooks.EventData{ToolName: "Bash"},
+	})
 	require.NoError(t, err)
 
 	info := readAgentInfo(t, statusPath)
-	assert.Empty(t, info.SessionStatus)
+	assert.Equal(t, "COMPLETED", info.Status, "COMPLETED should not be cleared by tool-start")
 }
 
 func TestStatusHandler_Handle_ClearsWaitingOnActivity(t *testing.T) {
@@ -196,8 +182,8 @@ func TestStatusHandler_Handle_ClearsWaitingOnActivity(t *testing.T) {
 			statusPath := filepath.Join(tmpDir, "agent-info.json")
 			h := &StatusHandler{StatusPath: statusPath}
 
-			// Pre-set sessionStatus to WAITING_FOR_INPUT
-			err := h.UpdateStatus(hooks.StateWaitingForInput, true)
+			// Pre-set status to WAITING_FOR_INPUT
+			err := h.UpdateStatus(hooks.StateWaitingForInput)
 			require.NoError(t, err)
 
 			// Handle the activity event
@@ -205,7 +191,7 @@ func TestStatusHandler_Handle_ClearsWaitingOnActivity(t *testing.T) {
 			require.NoError(t, err)
 
 			info := readAgentInfo(t, statusPath)
-			assert.Empty(t, info.SessionStatus, "sessionStatus should be cleared")
+			assert.NotEqual(t, "WAITING_FOR_INPUT", info.Status, "WAITING_FOR_INPUT should be cleared")
 		})
 	}
 }
@@ -215,8 +201,8 @@ func TestStatusHandler_Handle_DoesNotClearCompletedOnToolStart(t *testing.T) {
 	statusPath := filepath.Join(tmpDir, "agent-info.json")
 	h := &StatusHandler{StatusPath: statusPath}
 
-	// Pre-set sessionStatus to COMPLETED
-	err := h.UpdateStatus(hooks.StateCompleted, true)
+	// Pre-set status to COMPLETED
+	err := h.UpdateStatus(hooks.StateCompleted)
 	require.NoError(t, err)
 
 	// Handle a tool-start event — tools may fire after task_completed as wrap-up
@@ -227,7 +213,7 @@ func TestStatusHandler_Handle_DoesNotClearCompletedOnToolStart(t *testing.T) {
 	require.NoError(t, err)
 
 	info := readAgentInfo(t, statusPath)
-	assert.Equal(t, "COMPLETED", info.SessionStatus, "COMPLETED should not be cleared by tool-start")
+	assert.Equal(t, "COMPLETED", info.Status, "COMPLETED should not be cleared by tool-start")
 }
 
 func TestStatusHandler_Handle_DoesNotClearCompletedOnAgentEnd(t *testing.T) {
@@ -235,23 +221,23 @@ func TestStatusHandler_Handle_DoesNotClearCompletedOnAgentEnd(t *testing.T) {
 	statusPath := filepath.Join(tmpDir, "agent-info.json")
 	h := &StatusHandler{StatusPath: statusPath}
 
-	// Pre-set sessionStatus to COMPLETED
-	err := h.UpdateStatus(hooks.StateCompleted, true)
+	// Pre-set status to COMPLETED
+	err := h.UpdateStatus(hooks.StateCompleted)
 	require.NoError(t, err)
 
-	// Handle agent-end events (Stop/SubagentStop) — should not clear COMPLETED
+	// Handle agent-end events — should not clear COMPLETED
 	err = h.Handle(&hooks.Event{Name: hooks.EventAgentEnd})
 	require.NoError(t, err)
 
 	info := readAgentInfo(t, statusPath)
-	assert.Equal(t, "COMPLETED", info.SessionStatus, "COMPLETED should not be cleared by agent-end")
+	assert.Equal(t, "COMPLETED", info.Status, "COMPLETED should not be cleared by agent-end")
 
 	// Second agent-end (e.g., SubagentStop)
 	err = h.Handle(&hooks.Event{Name: hooks.EventAgentEnd})
 	require.NoError(t, err)
 
 	info = readAgentInfo(t, statusPath)
-	assert.Equal(t, "COMPLETED", info.SessionStatus, "COMPLETED should survive multiple agent-end events")
+	assert.Equal(t, "COMPLETED", info.Status, "COMPLETED should survive multiple agent-end events")
 }
 
 func TestStatusHandler_Handle_DoesNotClearCompletedOnToolEnd(t *testing.T) {
@@ -259,8 +245,8 @@ func TestStatusHandler_Handle_DoesNotClearCompletedOnToolEnd(t *testing.T) {
 	statusPath := filepath.Join(tmpDir, "agent-info.json")
 	h := &StatusHandler{StatusPath: statusPath}
 
-	// Pre-set sessionStatus to COMPLETED
-	err := h.UpdateStatus(hooks.StateCompleted, true)
+	// Pre-set status to COMPLETED
+	err := h.UpdateStatus(hooks.StateCompleted)
 	require.NoError(t, err)
 
 	// Handle tool-end event
@@ -268,7 +254,7 @@ func TestStatusHandler_Handle_DoesNotClearCompletedOnToolEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	info := readAgentInfo(t, statusPath)
-	assert.Equal(t, "COMPLETED", info.SessionStatus, "COMPLETED should not be cleared by tool-end")
+	assert.Equal(t, "COMPLETED", info.Status, "COMPLETED should not be cleared by tool-end")
 }
 
 func TestStatusHandler_Handle_ClearsCompletedOnNewWork(t *testing.T) {
@@ -296,8 +282,8 @@ func TestStatusHandler_Handle_ClearsCompletedOnNewWork(t *testing.T) {
 			statusPath := filepath.Join(tmpDir, "agent-info.json")
 			h := &StatusHandler{StatusPath: statusPath}
 
-			// Pre-set sessionStatus to COMPLETED
-			err := h.UpdateStatus(hooks.StateCompleted, true)
+			// Pre-set status to COMPLETED
+			err := h.UpdateStatus(hooks.StateCompleted)
 			require.NoError(t, err)
 
 			// Handle the new-work event
@@ -305,7 +291,7 @@ func TestStatusHandler_Handle_ClearsCompletedOnNewWork(t *testing.T) {
 			require.NoError(t, err)
 
 			info := readAgentInfo(t, statusPath)
-			assert.Empty(t, info.SessionStatus, "COMPLETED should be cleared by new work event")
+			assert.NotEqual(t, "COMPLETED", info.Status, "COMPLETED should be cleared by new work event")
 		})
 	}
 }
@@ -318,10 +304,10 @@ func TestStatusHandler_Handle_CompletedLifecycle(t *testing.T) {
 	h := &StatusHandler{StatusPath: statusPath}
 
 	// 1. Agent completes task
-	err := h.UpdateStatus(hooks.StateCompleted, true)
+	err := h.UpdateStatus(hooks.StateCompleted)
 	require.NoError(t, err)
 	info := readAgentInfo(t, statusPath)
-	assert.Equal(t, "COMPLETED", info.SessionStatus)
+	assert.Equal(t, "COMPLETED", info.Status)
 
 	// 2. Wrap-up tool fires (e.g., TaskUpdate)
 	err = h.Handle(&hooks.Event{
@@ -330,31 +316,32 @@ func TestStatusHandler_Handle_CompletedLifecycle(t *testing.T) {
 	})
 	require.NoError(t, err)
 	info = readAgentInfo(t, statusPath)
-	assert.Equal(t, "COMPLETED", info.SessionStatus, "should survive tool-start")
+	assert.Equal(t, "COMPLETED", info.Status, "should survive tool-start")
 
 	// 3. Tool completes
 	err = h.Handle(&hooks.Event{Name: hooks.EventToolEnd})
 	require.NoError(t, err)
 	info = readAgentInfo(t, statusPath)
-	assert.Equal(t, "COMPLETED", info.SessionStatus, "should survive tool-end")
+	assert.Equal(t, "COMPLETED", info.Status, "should survive tool-end")
 
 	// 4. Agent turn ends (Stop event)
 	err = h.Handle(&hooks.Event{Name: hooks.EventAgentEnd})
 	require.NoError(t, err)
 	info = readAgentInfo(t, statusPath)
-	assert.Equal(t, "COMPLETED", info.SessionStatus, "should survive agent-end")
+	assert.Equal(t, "COMPLETED", info.Status, "should survive agent-end")
 
 	// 5. Another Stop event (SubagentStop)
 	err = h.Handle(&hooks.Event{Name: hooks.EventAgentEnd})
 	require.NoError(t, err)
 	info = readAgentInfo(t, statusPath)
-	assert.Equal(t, "COMPLETED", info.SessionStatus, "should survive second agent-end")
+	assert.Equal(t, "COMPLETED", info.Status, "should survive second agent-end")
 
 	// 6. New prompt arrives — COMPLETED should now be cleared
 	err = h.Handle(&hooks.Event{Name: hooks.EventPromptSubmit})
 	require.NoError(t, err)
 	info = readAgentInfo(t, statusPath)
-	assert.Empty(t, info.SessionStatus, "should be cleared by new prompt")
+	assert.NotEqual(t, "COMPLETED", info.Status, "should be cleared by new prompt")
+	assert.Equal(t, "THINKING", info.Status)
 }
 
 func TestStatusHandler_Handle_ToolEndDoesNotClearWaiting(t *testing.T) {
@@ -362,8 +349,8 @@ func TestStatusHandler_Handle_ToolEndDoesNotClearWaiting(t *testing.T) {
 	statusPath := filepath.Join(tmpDir, "agent-info.json")
 	h := &StatusHandler{StatusPath: statusPath}
 
-	// Pre-set sessionStatus to WAITING_FOR_INPUT
-	err := h.UpdateStatus(hooks.StateWaitingForInput, true)
+	// Pre-set status to WAITING_FOR_INPUT
+	err := h.UpdateStatus(hooks.StateWaitingForInput)
 	require.NoError(t, err)
 
 	// Handle a tool-end event (should NOT clear)
@@ -371,7 +358,7 @@ func TestStatusHandler_Handle_ToolEndDoesNotClearWaiting(t *testing.T) {
 	require.NoError(t, err)
 
 	info := readAgentInfo(t, statusPath)
-	assert.Equal(t, "WAITING_FOR_INPUT", info.SessionStatus, "tool-end should not clear waiting")
+	assert.Equal(t, "WAITING_FOR_INPUT", info.Status, "tool-end should not clear waiting")
 }
 
 func TestStatusHandler_Handle_ClaudeExitPlanMode(t *testing.T) {
@@ -388,8 +375,7 @@ func TestStatusHandler_Handle_ClaudeExitPlanMode(t *testing.T) {
 	require.NoError(t, err)
 
 	info := readAgentInfo(t, statusPath)
-	assert.Equal(t, "EXECUTING", info.Status)
-	assert.Equal(t, "WAITING_FOR_INPUT", info.SessionStatus)
+	assert.Equal(t, "WAITING_FOR_INPUT", info.Status)
 }
 
 func TestStatusHandler_Handle_ClaudeAskUserQuestion(t *testing.T) {
@@ -397,8 +383,8 @@ func TestStatusHandler_Handle_ClaudeAskUserQuestion(t *testing.T) {
 	statusPath := filepath.Join(tmpDir, "agent-info.json")
 	h := &StatusHandler{StatusPath: statusPath}
 
-	// Pre-set sessionStatus to WAITING_FOR_INPUT (simulating sciontool status ask_user)
-	err := h.UpdateStatus(hooks.StateWaitingForInput, true)
+	// Pre-set status to WAITING_FOR_INPUT (simulating sciontool status ask_user)
+	err := h.UpdateStatus(hooks.StateWaitingForInput)
 	require.NoError(t, err)
 
 	// Handle AskUserQuestion tool-start from Claude dialect
@@ -410,7 +396,7 @@ func TestStatusHandler_Handle_ClaudeAskUserQuestion(t *testing.T) {
 	require.NoError(t, err)
 
 	info := readAgentInfo(t, statusPath)
-	assert.Equal(t, "WAITING_FOR_INPUT", info.SessionStatus, "AskUserQuestion should maintain WAITING_FOR_INPUT")
+	assert.Equal(t, "WAITING_FOR_INPUT", info.Status, "AskUserQuestion should maintain WAITING_FOR_INPUT")
 }
 
 func TestStatusHandler_Handle_NonClaudeExitPlanModeIgnored(t *testing.T) {
@@ -418,7 +404,7 @@ func TestStatusHandler_Handle_NonClaudeExitPlanModeIgnored(t *testing.T) {
 	statusPath := filepath.Join(tmpDir, "agent-info.json")
 	h := &StatusHandler{StatusPath: statusPath}
 
-	// Handle ExitPlanMode from a non-claude dialect — should NOT set sessionStatus
+	// Handle ExitPlanMode from a non-claude dialect — should NOT set WAITING_FOR_INPUT
 	err := h.Handle(&hooks.Event{
 		Name:    hooks.EventToolStart,
 		Dialect: "gemini",
@@ -427,7 +413,7 @@ func TestStatusHandler_Handle_NonClaudeExitPlanModeIgnored(t *testing.T) {
 	require.NoError(t, err)
 
 	info := readAgentInfo(t, statusPath)
-	assert.Empty(t, info.SessionStatus, "non-claude ExitPlanMode should not set sessionStatus")
+	assert.Equal(t, "EXECUTING", info.Status, "non-claude ExitPlanMode should set EXECUTING, not WAITING_FOR_INPUT")
 }
 
 func TestStatusHandler_Handle_ClaudeExitPlanModeThenActivity(t *testing.T) {
@@ -444,16 +430,16 @@ func TestStatusHandler_Handle_ClaudeExitPlanModeThenActivity(t *testing.T) {
 	require.NoError(t, err)
 
 	info := readAgentInfo(t, statusPath)
-	assert.Equal(t, "WAITING_FOR_INPUT", info.SessionStatus)
+	assert.Equal(t, "WAITING_FOR_INPUT", info.Status)
 
-	// Tool-end for ExitPlanMode should NOT clear it
+	// Tool-end for ExitPlanMode should NOT clear it (sticky)
 	err = h.Handle(&hooks.Event{Name: hooks.EventToolEnd, Dialect: "claude"})
 	require.NoError(t, err)
 
 	info = readAgentInfo(t, statusPath)
-	assert.Equal(t, "WAITING_FOR_INPUT", info.SessionStatus)
+	assert.Equal(t, "WAITING_FOR_INPUT", info.Status)
 
-	// User approves plan, next tool starts — should clear
+	// User approves plan, next tool starts — should clear WAITING_FOR_INPUT
 	err = h.Handle(&hooks.Event{
 		Name:    hooks.EventToolStart,
 		Dialect: "claude",
@@ -462,7 +448,7 @@ func TestStatusHandler_Handle_ClaudeExitPlanModeThenActivity(t *testing.T) {
 	require.NoError(t, err)
 
 	info = readAgentInfo(t, statusPath)
-	assert.Empty(t, info.SessionStatus, "activity after plan approval should clear WAITING_FOR_INPUT")
+	assert.Equal(t, "EXECUTING", info.Status, "activity after plan approval should clear WAITING_FOR_INPUT")
 }
 
 func TestStatusHandler_PreservesExtraFields(t *testing.T) {
@@ -486,7 +472,7 @@ func TestStatusHandler_PreservesExtraFields(t *testing.T) {
 	h := &StatusHandler{StatusPath: statusPath}
 
 	// Update status — this should NOT destroy the extra fields
-	err = h.UpdateStatus(hooks.StateThinking, false)
+	err = h.UpdateStatus(hooks.StateThinking)
 	require.NoError(t, err)
 
 	result := readAgentInfoMap(t, statusPath)
@@ -498,30 +484,59 @@ func TestStatusHandler_PreservesExtraFields(t *testing.T) {
 	assert.Equal(t, "default", result["profile"], "profile field should be preserved")
 	assert.Equal(t, "agent-1", result["name"], "name field should be preserved")
 
-	// Update session status — extra fields should still be there
-	err = h.UpdateStatus(hooks.StateWaitingForInput, true)
+	// Update to WAITING_FOR_INPUT — extra fields should still be there
+	err = h.UpdateStatus(hooks.StateWaitingForInput)
 	require.NoError(t, err)
 
 	result = readAgentInfoMap(t, statusPath)
+	assert.Equal(t, "WAITING_FOR_INPUT", result["status"])
+	assert.Equal(t, "my-template", result["template"], "template field should survive status update")
+	assert.Equal(t, "claude", result["harnessConfig"], "harnessConfig field should survive status update")
+}
+
+func TestStatusHandler_RemovesLegacySessionStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	statusPath := filepath.Join(tmpDir, "agent-info.json")
+
+	// Seed agent-info.json with legacy sessionStatus field
+	initial := map[string]interface{}{
+		"status":        "running",
+		"sessionStatus": "WAITING_FOR_INPUT",
+	}
+	data, err := json.Marshal(initial)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(statusPath, data, 0644))
+
+	h := &StatusHandler{StatusPath: statusPath}
+
+	// Any UpdateStatus call should remove the legacy sessionStatus field
+	err = h.UpdateStatus(hooks.StateThinking)
+	require.NoError(t, err)
+
+	result := readAgentInfoMap(t, statusPath)
 	assert.Equal(t, "THINKING", result["status"])
-	assert.Equal(t, "WAITING_FOR_INPUT", result["sessionStatus"])
-	assert.Equal(t, "my-template", result["template"], "template field should survive session status update")
-	assert.Equal(t, "claude", result["harnessConfig"], "harnessConfig field should survive session status update")
+	assert.Nil(t, result["sessionStatus"], "legacy sessionStatus should be removed")
+}
 
-	// Clear session status — extra fields should still be there
-	err = h.ClearSessionStatus()
+func TestStatusHandler_NotificationSetsWaitingForInput(t *testing.T) {
+	tmpDir := t.TempDir()
+	statusPath := filepath.Join(tmpDir, "agent-info.json")
+	h := &StatusHandler{StatusPath: statusPath}
+
+	// Handle notification event
+	err := h.Handle(&hooks.Event{
+		Name: hooks.EventNotification,
+		Data: hooks.EventData{Message: "Please confirm"},
+	})
 	require.NoError(t, err)
 
-	result = readAgentInfoMap(t, statusPath)
-	assert.Nil(t, result["sessionStatus"], "sessionStatus should be cleared")
-	assert.Equal(t, "my-template", result["template"], "template field should survive clear")
-	assert.Equal(t, "claude", result["harnessConfig"], "harnessConfig field should survive clear")
+	info := readAgentInfo(t, statusPath)
+	assert.Equal(t, "WAITING_FOR_INPUT", info.Status, "notification should set WAITING_FOR_INPUT")
 }
 
 // agentInfoFields is a test-only struct for reading status fields from agent-info.json.
 type agentInfoFields struct {
-	Status        string `json:"status,omitempty"`
-	SessionStatus string `json:"sessionStatus,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 // readAgentInfo is a test helper that reads and parses agent-info.json.

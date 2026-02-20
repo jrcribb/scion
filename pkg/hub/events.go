@@ -65,7 +65,6 @@ type AgentStatusEvent struct {
 	AgentID         string `json:"agentId"`
 	GroveID         string `json:"groveId"`
 	Status          string `json:"status"`
-	SessionStatus   string `json:"sessionStatus,omitempty"`
 	ContainerStatus string `json:"containerStatus,omitempty"`
 }
 
@@ -221,7 +220,6 @@ func (p *ChannelEventPublisher) PublishAgentStatus(_ context.Context, agent *sto
 		AgentID:         agent.ID,
 		GroveID:         agent.GroveID,
 		Status:          agent.Status,
-		SessionStatus:   agent.SessionStatus,
 		ContainerStatus: agent.ContainerStatus,
 	}
 	p.publish("agent."+agent.ID+".status", evt)

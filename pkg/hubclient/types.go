@@ -31,7 +31,6 @@ type Agent struct {
 	Status          string            `json:"status"`
 	ConnectionState string            `json:"connectionState,omitempty"`
 	ContainerStatus string            `json:"containerStatus,omitempty"`
-	SessionStatus   string            `json:"sessionStatus,omitempty"`
 	RuntimeState    string            `json:"runtimeState,omitempty"`
 	Image           string            `json:"image,omitempty"`
 	Detached        bool              `json:"detached,omitempty"`

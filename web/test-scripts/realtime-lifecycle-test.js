@@ -113,7 +113,7 @@ async function run() {
       Authorization: `Bearer ${TOKEN}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ status: 'running', sessionStatus: 'started' }),
+    body: JSON.stringify({ status: 'running' }),
   });
   console.log('Status update response:', statusResp.status);
 
@@ -129,7 +129,7 @@ async function run() {
       Authorization: `Bearer ${TOKEN}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ status: 'stopped', sessionStatus: 'completed' }),
+    body: JSON.stringify({ status: 'stopped' }),
   });
   console.log('Stop response:', stopResp.status);
 

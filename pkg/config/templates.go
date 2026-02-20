@@ -683,9 +683,6 @@ func MergeScionConfig(base, override *api.ScionConfig) *api.ScionConfig {
 			if override.Info.Status != "" {
 				infoCopy.Status = override.Info.Status
 			}
-			if override.Info.SessionStatus != "" {
-				infoCopy.SessionStatus = override.Info.SessionStatus
-			}
 			if override.Info.Image != "" {
 				infoCopy.Image = override.Info.Image
 			}

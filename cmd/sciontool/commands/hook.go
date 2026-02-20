@@ -235,8 +235,8 @@ func runAskUser(message string) {
 	loggingHandler := handlers.NewLoggingHandler()
 	hubHandler := handlers.NewHubHandler()
 
-	// Update session status to waiting for input
-	if err := statusHandler.UpdateStatus(hooks.StateWaitingForInput, true); err != nil {
+	// Update status to waiting for input (sticky)
+	if err := statusHandler.UpdateStatus(hooks.StateWaitingForInput); err != nil {
 		log.Error("Failed to update status: %v", err)
 	}
 
@@ -262,8 +262,8 @@ func runTaskCompleted(message string) {
 	loggingHandler := handlers.NewLoggingHandler()
 	hubHandler := handlers.NewHubHandler()
 
-	// Update session status to completed
-	if err := statusHandler.UpdateStatus(hooks.StateCompleted, true); err != nil {
+	// Update status to completed (sticky)
+	if err := statusHandler.UpdateStatus(hooks.StateCompleted); err != nil {
 		log.Error("Failed to update status: %v", err)
 	}
 

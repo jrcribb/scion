@@ -197,7 +197,6 @@ func hubAgentToAgentInfo(a hubclient.Agent) api.AgentInfo {
 		Annotations:       a.Annotations,
 		Status:            a.Status,
 		ContainerStatus:   a.ContainerStatus,
-		SessionStatus:     a.SessionStatus,
 		Image:             a.Image,
 		Detached:          a.Detached,
 		Runtime:           a.Runtime,
@@ -258,18 +257,14 @@ func displayAgents(agents []api.AgentInfo, all bool, hubMode bool) error {
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	if hubMode {
-		fmt.Fprintln(w, "NAME\tTEMPLATE\tHARNESS\tRUNTIME\tGROVE\tBROKER\tAGENT STATUS\tSESSION\tCONTAINER\tLAST EVENT")
+		fmt.Fprintln(w, "NAME\tTEMPLATE\tHARNESS\tRUNTIME\tGROVE\tBROKER\tSTATUS\tCONTAINER\tLAST EVENT")
 	} else {
-		fmt.Fprintln(w, "NAME\tTEMPLATE\tHARNESS\tRUNTIME\tGROVE\tAGENT STATUS\tSESSION\tCONTAINER\tLAST EVENT")
+		fmt.Fprintln(w, "NAME\tTEMPLATE\tHARNESS\tRUNTIME\tGROVE\tSTATUS\tCONTAINER\tLAST EVENT")
 	}
 	for _, a := range agents {
 		agentStatus := a.Status
 		if agentStatus == "" {
 			agentStatus = "IDLE"
-		}
-		sessionStatus := a.SessionStatus
-		if sessionStatus == "" {
-			sessionStatus = "-"
 		}
 		containerStatus := a.ContainerStatus
 		if containerStatus == "created" && a.ID == "" {
@@ -286,9 +281,9 @@ func displayAgents(agents []api.AgentInfo, all bool, hubMode bool) error {
 			broker = a.RuntimeBrokerID
 		}
 		if hubMode {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, harnessConfig, a.Runtime, a.Grove, broker, agentStatus, sessionStatus, containerStatus, lastEvent)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, harnessConfig, a.Runtime, a.Grove, broker, agentStatus, containerStatus, lastEvent)
 		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, harnessConfig, a.Runtime, a.Grove, agentStatus, sessionStatus, containerStatus, lastEvent)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", a.Name, a.Template, harnessConfig, a.Runtime, a.Grove, agentStatus, containerStatus, lastEvent)
 		}
 	}
 	w.Flush()

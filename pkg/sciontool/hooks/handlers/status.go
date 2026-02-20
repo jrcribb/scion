@@ -35,6 +35,16 @@ func NewStatusHandler() *StatusHandler {
 	}
 }
 
+// isStickyStatus returns true if the given status is a "sticky" value that
+// should resist being overwritten by normal event-driven updates.
+func isStickyStatus(status string) bool {
+	switch status {
+	case string(hooks.StateWaitingForInput), string(hooks.StateCompleted):
+		return true
+	}
+	return false
+}
+
 // Handle processes an event and updates the agent status.
 func (h *StatusHandler) Handle(event *hooks.Event) error {
 	state := h.eventToState(event)
@@ -42,63 +52,78 @@ func (h *StatusHandler) Handle(event *hooks.Event) error {
 		return nil // Event doesn't trigger a state change
 	}
 
-	// Update operational status
-	if err := h.UpdateStatus(state, false); err != nil {
-		return err
-	}
-
-	// Claude-specific: ExitPlanMode asks user to approve plan
-	if event.Dialect == "claude" && event.Name == hooks.EventToolStart && event.Data.ToolName == "ExitPlanMode" {
-		return h.UpdateStatus(hooks.StateWaitingForInput, true)
-	}
-
-	// Claude-specific: AskUserQuestion maintains WAITING_FOR_INPUT that was
-	// set by a prior "sciontool status ask_user" call (which runs in a Bash
-	// tool whose PostToolUse could otherwise clear it).
-	if event.Dialect == "claude" && event.Name == hooks.EventToolStart && event.Data.ToolName == "AskUserQuestion" {
-		return h.UpdateStatus(hooks.StateWaitingForInput, true)
-	}
-
-	// New work events (new prompt, new agent turn, new session) indicate the
-	// agent is starting fresh work. Clear any transient session status,
-	// including COMPLETED (the previous task is done, new one is starting).
+	// New work events (prompt-submit, agent-start, session-start): always
+	// update status unconditionally — clears any sticky state.
 	if isNewWorkEvent(event.Name) {
-		return h.ClearSessionStatus()
+		return h.UpdateStatus(state)
 	}
 
-	// Tool-start events indicate the agent is actively working within the
-	// current task. Clear WAITING_FOR_INPUT (user has responded) but preserve
-	// COMPLETED (tools may fire after task_completed as part of wrap-up).
+	// Tool-start events require special handling for sticky states.
 	if event.Name == hooks.EventToolStart {
-		return h.ClearWaitingStatus()
+		// Claude-specific: ExitPlanMode and AskUserQuestion set WAITING_FOR_INPUT (sticky).
+		if event.Dialect == "claude" && (event.Data.ToolName == "ExitPlanMode" || event.Data.ToolName == "AskUserQuestion") {
+			return h.UpdateStatus(hooks.StateWaitingForInput)
+		}
+
+		// Tool-start clears WAITING_FOR_INPUT (user has responded) but
+		// preserves COMPLETED (tools may fire after task_completed as wrap-up).
+		return h.updateStatusIfNotSticky(state, true)
 	}
 
-	return nil
+	// Notification event: set WAITING_FOR_INPUT directly (sticky).
+	if event.Name == hooks.EventNotification {
+		return h.UpdateStatus(hooks.StateWaitingForInput)
+	}
+
+	// All other events (tool-end, agent-end, model-end, etc.): update status
+	// only if current status is not sticky.
+	return h.updateStatusIfNotSticky(state, false)
 }
 
 // UpdateStatus writes the status to the agent-info.json file atomically.
-func (h *StatusHandler) UpdateStatus(status hooks.AgentState, sessionStatus bool) error {
+func (h *StatusHandler) UpdateStatus(status hooks.AgentState) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	// Read existing data preserving all fields
 	info := h.readAgentInfoMap()
 
-	// Update the appropriate field
-	if sessionStatus {
-		if status == "" {
-			delete(info, "sessionStatus")
-		} else {
-			info["sessionStatus"] = string(status)
-		}
+	// Update the status field
+	if status == "" {
+		delete(info, "status")
 	} else {
-		if status == "" {
-			delete(info, "status")
-		} else {
-			info["status"] = string(status)
-		}
+		info["status"] = string(status)
 	}
 
+	// Remove legacy sessionStatus field if present
+	delete(info, "sessionStatus")
+
+	return h.writeAgentInfoLocked(info)
+}
+
+// updateStatusIfNotSticky updates the status only if the current status is not
+// sticky. If clearWaiting is true, WAITING_FOR_INPUT is also cleared (treated
+// as non-sticky for tool-start events where the user has responded).
+func (h *StatusHandler) updateStatusIfNotSticky(status hooks.AgentState, clearWaiting bool) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	info := h.readAgentInfoMap()
+
+	currentStatus, _ := info["status"].(string)
+
+	if isStickyStatus(currentStatus) {
+		if clearWaiting && currentStatus == string(hooks.StateWaitingForInput) {
+			// WAITING_FOR_INPUT is cleared by tool-start (user has responded)
+			info["status"] = string(status)
+			delete(info, "sessionStatus")
+			return h.writeAgentInfoLocked(info)
+		}
+		return nil // Status is sticky, don't overwrite
+	}
+
+	info["status"] = string(status)
+	delete(info, "sessionStatus")
 	return h.writeAgentInfoLocked(info)
 }
 
@@ -142,46 +167,8 @@ func (h *StatusHandler) writeAgentInfoLocked(info map[string]interface{}) error 
 	return nil
 }
 
-// ClearWaitingStatus clears the sessionStatus if it is currently WAITING_FOR_INPUT.
-// This is a no-op if sessionStatus is any other value (e.g., COMPLETED).
-// Used for tool-start events where the agent is still working on the same task.
-func (h *StatusHandler) ClearWaitingStatus() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	info := h.readAgentInfoMap()
-
-	ss, _ := info["sessionStatus"].(string)
-	if ss != string(hooks.StateWaitingForInput) {
-		return nil // Not waiting, nothing to clear
-	}
-
-	delete(info, "sessionStatus")
-	return h.writeAgentInfoLocked(info)
-}
-
-// ClearSessionStatus clears the sessionStatus if it is a transient state
-// (WAITING_FOR_INPUT or COMPLETED). This is called when new work begins
-// (new prompt, new agent turn, new session) to reset the session status.
-func (h *StatusHandler) ClearSessionStatus() error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	info := h.readAgentInfoMap()
-
-	ss, _ := info["sessionStatus"].(string)
-	switch ss {
-	case string(hooks.StateWaitingForInput), string(hooks.StateCompleted):
-		delete(info, "sessionStatus")
-		return h.writeAgentInfoLocked(info)
-	default:
-		return nil // Nothing to clear
-	}
-}
-
 // isNewWorkEvent returns true for events that indicate new work is starting.
-// These events clear all transient session status (both WAITING_FOR_INPUT and
-// COMPLETED), since the agent is beginning a new task or turn.
+// These events unconditionally update status, clearing any sticky state.
 func isNewWorkEvent(name string) bool {
 	switch name {
 	case hooks.EventPromptSubmit, hooks.EventAgentStart, hooks.EventSessionStart:

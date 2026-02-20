@@ -23,41 +23,41 @@ func TestStatusCommand(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 
 	tests := []struct {
-		name              string
-		args              []string
-		wantErr           bool
-		wantSessionStatus string
-		wantLogContains   string
+		name            string
+		args            []string
+		wantErr         bool
+		wantStatus      string
+		wantLogContains string
 	}{
 		{
-			name:              "ask_user with message",
-			args:              []string{"status", "ask_user", "What should I do?"},
-			wantSessionStatus: "WAITING_FOR_INPUT",
-			wantLogContains:   "Agent requested input: What should I do?",
+			name:            "ask_user with message",
+			args:            []string{"status", "ask_user", "What should I do?"},
+			wantStatus:      "WAITING_FOR_INPUT",
+			wantLogContains: "Agent requested input: What should I do?",
 		},
 		{
-			name:              "ask_user with default message",
-			args:              []string{"status", "ask_user"},
-			wantSessionStatus: "WAITING_FOR_INPUT",
-			wantLogContains:   "Agent requested input: Input requested",
+			name:            "ask_user with default message",
+			args:            []string{"status", "ask_user"},
+			wantStatus:      "WAITING_FOR_INPUT",
+			wantLogContains: "Agent requested input: Input requested",
 		},
 		{
-			name:              "task_completed with message",
-			args:              []string{"status", "task_completed", "Finished the feature"},
-			wantSessionStatus: "COMPLETED",
-			wantLogContains:   "Agent completed task: Finished the feature",
+			name:            "task_completed with message",
+			args:            []string{"status", "task_completed", "Finished the feature"},
+			wantStatus:      "COMPLETED",
+			wantLogContains: "Agent completed task: Finished the feature",
 		},
 		{
-			name:              "task_completed with default message",
-			args:              []string{"status", "task_completed"},
-			wantSessionStatus: "COMPLETED",
-			wantLogContains:   "Agent completed task: Task completed",
+			name:            "task_completed with default message",
+			args:            []string{"status", "task_completed"},
+			wantStatus:      "COMPLETED",
+			wantLogContains: "Agent completed task: Task completed",
 		},
 		{
-			name:              "ask_user with multi-word message",
-			args:              []string{"status", "ask_user", "Which", "option", "do", "you", "prefer?"},
-			wantSessionStatus: "WAITING_FOR_INPUT",
-			wantLogContains:   "Agent requested input: Which option do you prefer?",
+			name:            "ask_user with multi-word message",
+			args:            []string{"status", "ask_user", "Which", "option", "do", "you", "prefer?"},
+			wantStatus:      "WAITING_FOR_INPUT",
+			wantLogContains: "Agent requested input: Which option do you prefer?",
 		},
 	}
 
@@ -89,8 +89,8 @@ func TestStatusCommand(t *testing.T) {
 				t.Fatalf("Failed to parse status file: %v", err)
 			}
 
-			if got := info["sessionStatus"]; got != tt.wantSessionStatus {
-				t.Errorf("sessionStatus = %q, want %q", got, tt.wantSessionStatus)
+			if got := info["status"]; got != tt.wantStatus {
+				t.Errorf("status = %q, want %q", got, tt.wantStatus)
 			}
 
 			// Check the log file contains the expected message

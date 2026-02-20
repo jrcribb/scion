@@ -120,7 +120,7 @@ func (m *AgentManager) Provision(ctx context.Context, opts api.StartOptions) (*a
 	}
 	agentDir, _, _, cfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.HarnessConfig, opts.GrovePath, opts.Profile, "created", opts.Branch, opts.Workspace)
 	if err == nil {
-		_ = UpdateAgentConfig(opts.Name, opts.GrovePath, "created", m.Runtime.Name(), opts.Profile, "")
+		_ = UpdateAgentConfig(opts.Name, opts.GrovePath, "created", m.Runtime.Name(), opts.Profile)
 	}
 	if err != nil {
 		return cfg, err
@@ -480,10 +480,11 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		Template:      templateName,
 		HarnessConfig: harnessConfigName,
 		Profile:       profileName,
-		SessionStatus: "CREATED",
 	}
 	if optionalStatus != "" {
 		info.Status = optionalStatus
+	} else {
+		info.Status = "created"
 	}
 	if agentImage != "" {
 		info.Image = agentImage
@@ -576,7 +577,7 @@ func GetSavedRuntime(agentName string, grovePath string) string {
 	return ""
 }
 
-func UpdateAgentConfig(agentName string, grovePath string, status string, runtime string, profile string, sessionStatus string) error {
+func UpdateAgentConfig(agentName string, grovePath string, status string, runtime string, profile string) error {
 	projectDir, err := config.GetResolvedProjectDir(grovePath)
 	if err != nil {
 		return err
@@ -610,9 +611,6 @@ func UpdateAgentConfig(agentName string, grovePath string, status string, runtim
 	}
 	if profile != "" {
 		info.Profile = profile
-	}
-	if sessionStatus != "" {
-		info.SessionStatus = sessionStatus
 	}
 
 	newData, err := json.MarshalIndent(info, "", "  ")

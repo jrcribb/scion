@@ -42,7 +42,6 @@ func TestListEnrichesTemplateAndHarnessFromAgentInfo(t *testing.T) {
 		Template:      "my-template",
 		HarnessConfig: "claude",
 		Status:        "running",
-		SessionStatus: "THINKING",
 		Runtime:       "docker",
 	}
 	infoData, _ := json.MarshalIndent(info, "", "  ")

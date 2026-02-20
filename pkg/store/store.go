@@ -122,7 +122,6 @@ type AgentStatusUpdate struct {
 	Message         string            `json:"message,omitempty"`
 	ConnectionState string            `json:"connectionState,omitempty"`
 	ContainerStatus string            `json:"containerStatus,omitempty"`
-	SessionStatus   string            `json:"sessionStatus,omitempty"`
 	RuntimeState    string            `json:"runtimeState,omitempty"`
 	TaskSummary     string            `json:"taskSummary,omitempty"`
 	Heartbeat       bool              `json:"heartbeat,omitempty"`

@@ -637,8 +637,8 @@ export class ScionPageAgentDetail extends LitElement {
             <span class="info-value">${this.grove?.name || this.agent.groveId}</span>
           </div>
           <div class="info-item">
-            <span class="info-label">Session Status</span>
-            <span class="info-value">${this.agent.sessionStatus || 'Unknown'}</span>
+            <span class="info-label">Status</span>
+            <span class="info-value">${this.agent.status || 'Unknown'}</span>
           </div>
           <div class="info-item">
             <span class="info-label">Created</span>

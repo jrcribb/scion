@@ -330,8 +330,7 @@ type AgentInfo struct {
 
 	// Status fields
 	ContainerStatus string `json:"containerStatus,omitempty"` // Container status (e.g., Up 2 hours)
-	Status          string `json:"status,omitempty"`          // Scion agent high-level status (e.g., running, stopped)
-	SessionStatus   string `json:"sessionStatus,omitempty"`   // Agent session status (e.g., started, waiting, completed)
+	Status          string `json:"status,omitempty"`          // Scion agent status (e.g., running, stopped, WAITING_FOR_INPUT, COMPLETED)
 
 	// Runtime configuration
 	Image      string            `json:"image,omitempty"`

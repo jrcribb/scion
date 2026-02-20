@@ -62,8 +62,11 @@ func (h *HubHandler) Handle(event *hooks.Event) error {
 			if event.Data.ToolName == "ExitPlanMode" {
 				message = "Waiting for plan approval"
 			}
-			log.Debug("Hub: Reporting idle (waiting: %s)", event.Data.ToolName)
-			err = h.client.ReportIdle(ctx, message)
+			log.Debug("Hub: Reporting waiting_for_input (waiting: %s)", event.Data.ToolName)
+			err = h.client.UpdateStatus(ctx, hub.StatusUpdate{
+				Status:  hub.StatusWaitingForInput,
+				Message: message,
+			})
 			break
 		}
 
@@ -86,8 +89,11 @@ func (h *HubHandler) Handle(event *hooks.Event) error {
 		if event.Data.Message != "" {
 			message = truncateMessage(event.Data.Message, 100)
 		}
-		log.Debug("Hub: Reporting idle (waiting for input)")
-		err = h.client.ReportIdle(ctx, message)
+		log.Debug("Hub: Reporting waiting_for_input (notification)")
+		err = h.client.UpdateStatus(ctx, hub.StatusUpdate{
+			Status:  hub.StatusWaitingForInput,
+			Message: message,
+		})
 
 	case hooks.EventSessionEnd:
 		// Session ended
@@ -121,8 +127,11 @@ func (h *HubHandler) ReportWaitingForInput(message string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	log.Debug("Hub: Reporting idle (ask_user: %s)", truncateMessage(message, 50))
-	return h.client.ReportIdle(ctx, message)
+	log.Debug("Hub: Reporting waiting_for_input (ask_user: %s)", truncateMessage(message, 50))
+	return h.client.UpdateStatus(ctx, hub.StatusUpdate{
+		Status:  hub.StatusWaitingForInput,
+		Message: message,
+	})
 }
 
 // ReportTaskCompleted sends a task-completed status to the Hub.
@@ -135,7 +144,10 @@ func (h *HubHandler) ReportTaskCompleted(taskSummary string) error {
 	defer cancel()
 
 	log.Debug("Hub: Reporting task completed: %s", truncateMessage(taskSummary, 50))
-	return h.client.ReportTaskCompleted(ctx, taskSummary)
+	return h.client.UpdateStatus(ctx, hub.StatusUpdate{
+		Status:      hub.StatusCompleted,
+		TaskSummary: taskSummary,
+	})
 }
 
 // truncateMessage truncates a message to the specified length.

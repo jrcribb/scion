@@ -79,7 +79,6 @@ func TestDisplayAgentsLocalMode(t *testing.T) {
 			Runtime:         "docker",
 			Grove:           "my-project",
 			Status:          "running",
-			SessionStatus:   "ACTIVE",
 			ContainerStatus: "Up 2 hours",
 			LastSeen:        time.Now().Add(-30 * time.Second),
 		},
@@ -118,7 +117,7 @@ func TestDisplayAgentsLocalMode(t *testing.T) {
 	}
 
 	header := lines[0]
-	for _, col := range []string{"NAME", "TEMPLATE", "HARNESS", "RUNTIME", "GROVE", "AGENT STATUS", "SESSION", "CONTAINER", "LAST EVENT"} {
+	for _, col := range []string{"NAME", "TEMPLATE", "HARNESS", "RUNTIME", "GROVE", "STATUS", "CONTAINER", "LAST EVENT"} {
 		if !strings.Contains(header, col) {
 			t.Errorf("header missing column %q: %s", col, header)
 		}
@@ -148,7 +147,6 @@ func TestDisplayAgentsHubMode(t *testing.T) {
 			Grove:             "hub-project",
 			RuntimeBrokerName: "local-broker",
 			Status:            "running",
-			SessionStatus:     "THINKING",
 			ContainerStatus:   "Up 5 minutes",
 			LastSeen:          time.Now().Add(-2 * time.Minute),
 		},
@@ -177,7 +175,7 @@ func TestDisplayAgentsHubMode(t *testing.T) {
 
 	header := lines[0]
 	// Hub mode should have BROKER column
-	for _, col := range []string{"NAME", "TEMPLATE", "HARNESS", "RUNTIME", "GROVE", "BROKER", "AGENT STATUS", "SESSION", "CONTAINER", "LAST EVENT"} {
+	for _, col := range []string{"NAME", "TEMPLATE", "HARNESS", "RUNTIME", "GROVE", "BROKER", "STATUS", "CONTAINER", "LAST EVENT"} {
 		if !strings.Contains(header, col) {
 			t.Errorf("hub mode header missing column %q: %s", col, header)
 		}

@@ -2533,27 +2533,37 @@ func (s *Server) handleBrokerHeartbeat(w http.ResponseWriter, r *http.Request, i
 				continue
 			}
 
-			// Build status update with session status and container status
+			// Build status update with agent status and container status.
+			// Prefer the agent's activity status if present; fall back to
+			// container-derived lifecycle status; use terminal container
+			// status (exited/stopped) unconditionally.
 			statusUpdate := store.AgentStatusUpdate{
-				SessionStatus:   agentHB.Status,
 				ContainerStatus: agentHB.ContainerStatus,
 				Heartbeat:       true, // Ensures LastSeen is updated
 			}
 
+			// If the agent heartbeat includes an activity status, use it
+			if agentHB.Status != "" {
+				statusUpdate.Status = agentHB.Status
+			}
+
 			// Derive lifecycle status from container status to ensure agents
-			// registered via sync (not started via hub) get proper status
+			// registered via sync (not started via hub) get proper status.
+			// Terminal container states (exited/stopped) override agent status.
 			if agentHB.ContainerStatus != "" {
 				containerStatusLower := strings.ToLower(agentHB.ContainerStatus)
 				switch {
 				case strings.HasPrefix(containerStatusLower, "up") || containerStatusLower == "running":
-					statusUpdate.Status = store.AgentStatusRunning
+					if statusUpdate.Status == "" {
+						statusUpdate.Status = store.AgentStatusRunning
+					}
 				case strings.HasPrefix(containerStatusLower, "exited") || containerStatusLower == "stopped":
 					statusUpdate.Status = store.AgentStatusStopped
 				case containerStatusLower == "created":
 					// Don't downgrade a running agent to provisioning — the
 					// container may briefly report "created" while the runtime
 					// is transitioning to started.
-					if agent.Status != store.AgentStatusRunning {
+					if agent.Status != store.AgentStatusRunning && statusUpdate.Status == "" {
 						statusUpdate.Status = store.AgentStatusProvisioning
 					}
 				}

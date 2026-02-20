@@ -68,24 +68,24 @@ const (
 	StatusStopping     AgentStatus = "stopping"
 	StatusStopped      AgentStatus = "stopped"
 	StatusError        AgentStatus = "error"
-	StatusShuttingDown AgentStatus = "shutting_down"
-	StatusCloning      AgentStatus = "cloning"
+	StatusShuttingDown     AgentStatus = "shutting_down"
+	StatusCloning          AgentStatus = "cloning"
+	StatusWaitingForInput  AgentStatus = "waiting_for_input"
+	StatusCompleted        AgentStatus = "completed"
 )
 
 // StatusUpdate represents a status update request.
 // Fields:
-// - Status: Lifecycle status (running, stopped, error). Only set for lifecycle transitions.
-// - SessionStatus: Agent activity status (idle, busy). Used for agent session state.
+// - Status: Agent status (running, stopped, error, busy, idle, waiting_for_input, completed).
 // - Message: Optional message associated with the status.
 // - TaskSummary: Current task description.
 // - Heartbeat: If true, only updates last_seen without changing status.
 type StatusUpdate struct {
-	Status        AgentStatus       `json:"status,omitempty"`
-	SessionStatus AgentStatus       `json:"sessionStatus,omitempty"`
-	Message       string            `json:"message,omitempty"`
-	TaskSummary   string            `json:"taskSummary,omitempty"`
-	Heartbeat     bool              `json:"heartbeat,omitempty"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	Status      AgentStatus       `json:"status,omitempty"`
+	Message     string            `json:"message,omitempty"`
+	TaskSummary string            `json:"taskSummary,omitempty"`
+	Heartbeat   bool              `json:"heartbeat,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // Client is a Hub API client for sciontool.
@@ -270,20 +270,18 @@ func (c *Client) ReportCloning(ctx context.Context, message string, metadata map
 }
 
 // ReportBusy reports that the agent is busy with a task.
-// This updates the session status (not lifecycle status).
 func (c *Client) ReportBusy(ctx context.Context, message string) error {
 	return c.UpdateStatus(ctx, StatusUpdate{
-		SessionStatus: StatusBusy,
-		Message:       message,
+		Status:  StatusBusy,
+		Message: message,
 	})
 }
 
 // ReportIdle reports that the agent is idle.
-// This updates the session status (not lifecycle status).
 func (c *Client) ReportIdle(ctx context.Context, message string) error {
 	return c.UpdateStatus(ctx, StatusUpdate{
-		SessionStatus: StatusIdle,
-		Message:       message,
+		Status:  StatusIdle,
+		Message: message,
 	})
 }
 
@@ -312,11 +310,10 @@ func (c *Client) ReportStopped(ctx context.Context, message string) error {
 }
 
 // ReportTaskCompleted reports that a task has been completed.
-// This sets the session status to idle and records the task summary.
 func (c *Client) ReportTaskCompleted(ctx context.Context, taskSummary string) error {
 	return c.UpdateStatus(ctx, StatusUpdate{
-		SessionStatus: StatusIdle,
-		TaskSummary:   taskSummary,
+		Status:      StatusCompleted,
+		TaskSummary: taskSummary,
 	})
 }
 

@@ -200,7 +200,6 @@ func TestAgentStatusUpdate(t *testing.T) {
 	// Update status
 	err := s.UpdateAgentStatus(ctx, agent.ID, store.AgentStatusUpdate{
 		Status:          store.AgentStatusRunning,
-		SessionStatus:   "waiting",
 		ContainerStatus: "Up 5 minutes",
 	})
 	require.NoError(t, err)
@@ -209,7 +208,6 @@ func TestAgentStatusUpdate(t *testing.T) {
 	retrieved, err := s.GetAgent(ctx, agent.ID)
 	require.NoError(t, err)
 	assert.Equal(t, store.AgentStatusRunning, retrieved.Status)
-	assert.Equal(t, "waiting", retrieved.SessionStatus)
 	assert.Equal(t, "Up 5 minutes", retrieved.ContainerStatus)
 }
 

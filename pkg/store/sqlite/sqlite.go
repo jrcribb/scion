@@ -84,6 +84,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		migrationV12,
 		migrationV13,
 		migrationV14,
+		migrationV15,
 	}
 
 	// Create migrations table if not exists
@@ -485,6 +486,11 @@ const migrationV14 = `
 ALTER TABLE secrets ADD COLUMN secret_ref TEXT;
 `
 
+const migrationV15 = `
+UPDATE agents SET status = session_status WHERE session_status IS NOT NULL AND session_status != '';
+ALTER TABLE agents DROP COLUMN session_status;
+`
+
 // Helper functions for JSON marshaling/unmarshaling
 func marshalJSON(v interface{}) string {
 	if v == nil {
@@ -536,16 +542,16 @@ func (s *SQLiteStore) CreateAgent(ctx context.Context, agent *store.Agent) error
 		INSERT INTO agents (
 			id, agent_id, name, template, grove_id,
 			labels, annotations,
-			status, connection_state, container_status, session_status, runtime_state,
+			status, connection_state, container_status, runtime_state,
 			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
 			created_at, updated_at, last_seen,
 			created_by, owner_id, visibility, state_version
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		agent.ID, agent.Slug, agent.Name, agent.Template, agent.GroveID,
 		marshalJSON(agent.Labels), marshalJSON(agent.Annotations),
-		agent.Status, agent.ConnectionState, agent.ContainerStatus, agent.SessionStatus, agent.RuntimeState,
+		agent.Status, agent.ConnectionState, agent.ContainerStatus, agent.RuntimeState,
 		agent.Image, agent.Detached, agent.Runtime, nullableString(agent.RuntimeBrokerID), agent.WebPTYEnabled, agent.TaskSummary, agent.Message,
 		marshalJSON(agent.AppliedConfig),
 		agent.Created, agent.Updated, nullableTime(agent.LastSeen),
@@ -569,7 +575,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, agent_id, name, template, grove_id,
 			labels, annotations,
-			status, connection_state, container_status, session_status, runtime_state,
+			status, connection_state, container_status, runtime_state,
 			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
 			created_at, updated_at, last_seen,
@@ -578,7 +584,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 	`, id).Scan(
 		&agent.ID, &agent.Slug, &agent.Name, &agent.Template, &agent.GroveID,
 		&labels, &annotations,
-		&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
+		&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.RuntimeState,
 		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 		&appliedConfig,
 		&agent.Created, &agent.Updated, &lastSeen,
@@ -616,7 +622,7 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, agent_id, name, template, grove_id,
 			labels, annotations,
-			status, connection_state, container_status, session_status, runtime_state,
+			status, connection_state, container_status, runtime_state,
 			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
 			created_at, updated_at, last_seen,
@@ -625,7 +631,7 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 	`, groveID, slug).Scan(
 		&agent.ID, &agent.Slug, &agent.Name, &agent.Template, &agent.GroveID,
 		&labels, &annotations,
-		&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
+		&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.RuntimeState,
 		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 		&appliedConfig,
 		&agent.Created, &agent.Updated, &lastSeen,
@@ -662,7 +668,7 @@ func (s *SQLiteStore) UpdateAgent(ctx context.Context, agent *store.Agent) error
 		UPDATE agents SET
 			agent_id = ?, name = ?, template = ?,
 			labels = ?, annotations = ?,
-			status = ?, connection_state = ?, container_status = ?, session_status = ?, runtime_state = ?,
+			status = ?, connection_state = ?, container_status = ?, runtime_state = ?,
 			image = ?, detached = ?, runtime = ?, runtime_broker_id = ?, web_pty_enabled = ?, task_summary = ?, message = ?,
 			applied_config = ?,
 			updated_at = ?, last_seen = ?,
@@ -671,7 +677,7 @@ func (s *SQLiteStore) UpdateAgent(ctx context.Context, agent *store.Agent) error
 	`,
 		agent.Slug, agent.Name, agent.Template,
 		marshalJSON(agent.Labels), marshalJSON(agent.Annotations),
-		agent.Status, agent.ConnectionState, agent.ContainerStatus, agent.SessionStatus, agent.RuntimeState,
+		agent.Status, agent.ConnectionState, agent.ContainerStatus, agent.RuntimeState,
 		agent.Image, agent.Detached, agent.Runtime, nullableString(agent.RuntimeBrokerID), agent.WebPTYEnabled, agent.TaskSummary, agent.Message,
 		marshalJSON(agent.AppliedConfig),
 		agent.Updated, nullableTime(agent.LastSeen),
@@ -760,7 +766,7 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 	query := fmt.Sprintf(`
 		SELECT id, agent_id, name, template, grove_id,
 			labels, annotations,
-			status, connection_state, container_status, session_status, runtime_state,
+			status, connection_state, container_status, runtime_state,
 			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
 			created_at, updated_at, last_seen,
@@ -785,7 +791,7 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 		if err := rows.Scan(
 			&agent.ID, &agent.Slug, &agent.Name, &agent.Template, &agent.GroveID,
 			&labels, &annotations,
-			&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
+			&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.RuntimeState,
 			&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 			&appliedConfig,
 			&agent.Created, &agent.Updated, &lastSeen,
@@ -833,7 +839,6 @@ func (s *SQLiteStore) UpdateAgentStatus(ctx context.Context, id string, status s
 			message = COALESCE(NULLIF(?, ''), message),
 			connection_state = COALESCE(NULLIF(?, ''), connection_state),
 			container_status = COALESCE(NULLIF(?, ''), container_status),
-			session_status = COALESCE(NULLIF(?, ''), session_status),
 			runtime_state = COALESCE(NULLIF(?, ''), runtime_state),
 			task_summary = COALESCE(NULLIF(?, ''), task_summary),
 			updated_at = ?,
@@ -841,7 +846,7 @@ func (s *SQLiteStore) UpdateAgentStatus(ctx context.Context, id string, status s
 		WHERE id = ?
 	`,
 		status.Status, status.Message, status.ConnectionState, status.ContainerStatus,
-		status.SessionStatus, status.RuntimeState, status.TaskSummary,
+		status.RuntimeState, status.TaskSummary,
 		now, now, id,
 	)
 	if err != nil {

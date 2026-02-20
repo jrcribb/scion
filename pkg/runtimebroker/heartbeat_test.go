@@ -203,9 +203,9 @@ func TestHeartbeatService_IncludesAgentInfo(t *testing.T) {
 	client := &mockRuntimeBrokerService{}
 	manager := &heartbeatMockManager{
 		agents: []api.AgentInfo{
-			{Name: "agent-1", GroveID: "grove-1", SessionStatus: "running"},
-			{Name: "agent-2", GroveID: "grove-1", SessionStatus: "waiting"},
-			{Name: "agent-3", Grove: "grove-2", SessionStatus: "completed"},
+			{Name: "agent-1", GroveID: "grove-1", Status: "running"},
+			{Name: "agent-2", GroveID: "grove-1", Status: "waiting_for_input"},
+			{Name: "agent-3", Grove: "grove-2", Status: "completed"},
 		},
 	}
 

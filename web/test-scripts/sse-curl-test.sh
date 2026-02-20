@@ -63,7 +63,7 @@ echo "=== Updating agent status to running ==="
 # Note: status endpoint uses POST, not PATCH
 curl -s -X POST -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
-  -d '{"status": "running", "sessionStatus": "started"}' \
+  -d '{"status": "running"}' \
   "${BASE}/api/v1/agents/${AGENT_ID}/status" > /dev/null
 
 sleep 2
