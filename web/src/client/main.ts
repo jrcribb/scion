@@ -166,6 +166,14 @@ function renderRoute(path: string): void {
   if (STANDALONE_ROUTES.has(tag)) {
     // Standalone pages render without the app shell
     const page = document.createElement(tag);
+
+    // In dev mode (Vite), enable OAuth providers so the login page is functional.
+    // In production the Go server sets these attributes via its HTML template.
+    if (tag === 'scion-login-page') {
+      page.setAttribute('googleEnabled', '');
+      page.setAttribute('githubEnabled', '');
+    }
+
     appContainer.appendChild(page);
   } else {
     // Wrapped pages render inside the app shell
