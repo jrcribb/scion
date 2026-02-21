@@ -79,6 +79,7 @@ type AgentAppliedConfig struct {
 	Harness string            `json:"harness,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	Model   string            `json:"model,omitempty"`
+	Profile string            `json:"profile,omitempty"`   // Settings profile for the runtime broker
 	Task    string            `json:"task,omitempty"`      // Initial task/prompt for the agent
 	Attach  bool              `json:"attach,omitempty"`    // If true, signals interactive attach mode to the broker/harness
 	Workspace string          `json:"workspace,omitempty"` // Host path to mount as /workspace (overrides default grove root)

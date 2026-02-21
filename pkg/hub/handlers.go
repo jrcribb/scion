@@ -151,6 +151,7 @@ type CreateAgentRequest struct {
 	GroveID       string            `json:"groveId"`
 	RuntimeBrokerID string            `json:"runtimeBrokerId,omitempty"` // Optional: uses grove's default if not specified
 	Template      string            `json:"template"`
+	Profile       string            `json:"profile,omitempty"` // Settings profile for the runtime broker to use
 	Task          string            `json:"task,omitempty"`
 	Branch        string            `json:"branch,omitempty"`
 	Workspace     string            `json:"workspace,omitempty"`
@@ -409,6 +410,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 			Image:       req.Config.Image,
 			Env:         req.Config.Env,
 			Model:       req.Config.Model,
+			Profile:     req.Profile,
 			Harness:     s.getHarnessFromTemplate(resolvedTemplate, req.Template),
 			Task:        req.Task,
 			Attach:      req.Attach,
@@ -419,6 +421,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		agent.Detached = true
 		// Store task even when no config override is provided
 		agent.AppliedConfig = &store.AgentAppliedConfig{
+			Profile:     req.Profile,
 			Harness:     s.getHarnessFromTemplate(resolvedTemplate, req.Template),
 			Task:        req.Task,
 			Attach:      req.Attach,
@@ -1821,6 +1824,7 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 			Image:       req.Config.Image,
 			Env:         req.Config.Env,
 			Model:       req.Config.Model,
+			Profile:     req.Profile,
 			Harness:     s.getHarnessFromTemplate(resolvedTemplate, req.Template),
 			Task:        req.Task,
 			Attach:      req.Attach,
@@ -1831,6 +1835,7 @@ func (s *Server) createGroveAgent(w http.ResponseWriter, r *http.Request, groveI
 		agent.Detached = true
 		// Store task even when no config override is provided
 		agent.AppliedConfig = &store.AgentAppliedConfig{
+			Profile:     req.Profile,
 			Harness:     s.getHarnessFromTemplate(resolvedTemplate, req.Template),
 			Task:        req.Task,
 			Attach:      req.Attach,

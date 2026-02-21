@@ -227,6 +227,7 @@ type RemoteAgentConfig struct {
 	Env         []string `json:"env,omitempty"`
 	Task        string   `json:"task,omitempty"`
 	CommandArgs []string `json:"commandArgs,omitempty"`
+	Profile     string   `json:"profile,omitempty"` // Settings profile for the runtime broker
 
 	// TemplateID is the Hub template ID for cache lookup on the Runtime Broker.
 	// When provided, the Runtime Broker can use this to fetch the template

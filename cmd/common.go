@@ -435,6 +435,7 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 		GroveID:       groveID,
 		Template:      resolvedTemplate,
 		RuntimeBrokerID: runtimeBrokerID,
+		Profile:       profile,
 		Task:          task,
 		Branch:        branch,
 		Workspace:     workspace,

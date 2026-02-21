@@ -189,6 +189,7 @@ type CreateAgentConfig struct {
 	Harness     string                `json:"harness,omitempty"`
 	Task        string                `json:"task,omitempty"`
 	CommandArgs []string              `json:"commandArgs,omitempty"`
+	Profile     string                `json:"profile,omitempty"` // Settings profile for the runtime broker
 	Kubernetes  *api.KubernetesConfig `json:"kubernetes,omitempty"`
 
 	// TemplateID is the Hub template ID for cache lookup.

@@ -1494,3 +1494,60 @@ func TestCreateAgent_GitGroveDefaultBranchFallback(t *testing.T) {
 		"branch should default to 'main' when scion.dev/default-branch label is absent")
 	assert.Equal(t, 1, persisted.AppliedConfig.GitClone.Depth)
 }
+
+func TestCreateAgent_ProfileStoredInAppliedConfig(t *testing.T) {
+	disp := &createAgentDispatcher{createStatus: store.AgentStatusRunning}
+	srv, s, grove := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "profiled-agent",
+		GroveID: grove.ID,
+		Profile: "custom-profile",
+		Task:    "do something",
+	})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+	require.NotNil(t, resp.Agent.AppliedConfig)
+	assert.Equal(t, "custom-profile", resp.Agent.AppliedConfig.Profile,
+		"Profile should be stored in AppliedConfig")
+
+	// Verify it's persisted in the store
+	persisted, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted.AppliedConfig)
+	assert.Equal(t, "custom-profile", persisted.AppliedConfig.Profile)
+}
+
+func TestCreateAgent_ProfileStoredWithConfigOverride(t *testing.T) {
+	disp := &createAgentDispatcher{createStatus: store.AgentStatusRunning}
+	srv, s, grove := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "profiled-agent-with-config",
+		GroveID: grove.ID,
+		Profile: "other-profile",
+		Task:    "do something",
+		Config:  &AgentConfigOverride{Image: "custom-image:latest"},
+	})
+
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent)
+	require.NotNil(t, resp.Agent.AppliedConfig)
+	assert.Equal(t, "other-profile", resp.Agent.AppliedConfig.Profile,
+		"Profile should be stored even when config override is present")
+	assert.Equal(t, "custom-image:latest", resp.Agent.AppliedConfig.Image)
+
+	persisted, err := s.GetAgent(ctx, resp.Agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, persisted.AppliedConfig)
+	assert.Equal(t, "other-profile", persisted.AppliedConfig.Profile)
+}

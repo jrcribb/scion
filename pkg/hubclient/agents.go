@@ -102,6 +102,7 @@ type CreateAgentRequest struct {
 	GroveID       string            `json:"groveId"`
 	Template      string            `json:"template,omitempty"`
 	RuntimeBrokerID string            `json:"runtimeBrokerId,omitempty"`
+	Profile       string            `json:"profile,omitempty"`
 	Task          string            `json:"task,omitempty"`
 	Branch        string            `json:"branch,omitempty"`
 	Workspace     string            `json:"workspace,omitempty"`

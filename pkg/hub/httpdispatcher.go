@@ -476,6 +476,7 @@ func (d *HTTPAgentDispatcher) buildCreateRequest(ctx context.Context, agent *sto
 			Image:        agent.AppliedConfig.Image,
 			Task:         agent.AppliedConfig.Task,
 			Workspace:    agent.AppliedConfig.Workspace,
+			Profile:      agent.AppliedConfig.Profile,
 			TemplateID:   agent.AppliedConfig.TemplateID,
 			TemplateHash: agent.AppliedConfig.TemplateHash,
 			GitClone:     agent.AppliedConfig.GitClone,

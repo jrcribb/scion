@@ -996,3 +996,55 @@ func TestCreateAgentWithoutGitClone(t *testing.T) {
 		t.Error("expected GitClone to be nil for regular agent")
 	}
 }
+
+func TestCreateAgentWithProfile(t *testing.T) {
+	srv, mgr := newTestServerWithProvisionCapture()
+
+	body := `{
+		"name": "profiled-agent",
+		"config": {"template": "claude", "profile": "custom-profile"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	if !mgr.startCalled {
+		t.Fatal("expected Start to be called")
+	}
+
+	if mgr.lastOpts.Profile != "custom-profile" {
+		t.Errorf("expected Profile 'custom-profile', got %q", mgr.lastOpts.Profile)
+	}
+}
+
+func TestCreateAgentWithoutProfile(t *testing.T) {
+	srv, mgr := newTestServerWithProvisionCapture()
+
+	body := `{
+		"name": "no-profile-agent",
+		"config": {"template": "claude"}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, w.Code, w.Body.String())
+	}
+
+	if !mgr.startCalled {
+		t.Fatal("expected Start to be called")
+	}
+
+	if mgr.lastOpts.Profile != "" {
+		t.Errorf("expected empty Profile, got %q", mgr.lastOpts.Profile)
+	}
+}
