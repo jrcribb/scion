@@ -348,6 +348,7 @@ export class ScionPageAgentDetail extends LitElement {
 
   private boundOnAgentsUpdated = this.onAgentsUpdated.bind(this);
   private boundOnGrovesUpdated = this.onGrovesUpdated.bind(this);
+  private relativeTimeInterval: ReturnType<typeof setInterval> | null = null;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -364,12 +365,19 @@ export class ScionPageAgentDetail extends LitElement {
     // Listen for real-time updates (scope is set after loadData resolves with groveId)
     stateManager.addEventListener('agents-updated', this.boundOnAgentsUpdated as EventListener);
     stateManager.addEventListener('groves-updated', this.boundOnGrovesUpdated as EventListener);
+
+    // Periodically re-render to keep relative timestamps fresh
+    this.relativeTimeInterval = setInterval(() => this.requestUpdate(), 15000);
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     stateManager.removeEventListener('agents-updated', this.boundOnAgentsUpdated as EventListener);
     stateManager.removeEventListener('groves-updated', this.boundOnGrovesUpdated as EventListener);
+    if (this.relativeTimeInterval) {
+      clearInterval(this.relativeTimeInterval);
+      this.relativeTimeInterval = null;
+    }
   }
 
   private onAgentsUpdated(): void {
@@ -462,6 +470,31 @@ export class ScionPageAgentDetail extends LitElement {
         hour: '2-digit',
         minute: '2-digit',
       }).format(date);
+    } catch {
+      return dateString;
+    }
+  }
+
+  private formatRelativeTime(dateString: string): string {
+    try {
+      const date = new Date(dateString);
+      const diffMs = Date.now() - date.getTime();
+      const diffSeconds = Math.round(diffMs / 1000);
+      const diffMinutes = Math.round(diffMs / (1000 * 60));
+      const diffHours = Math.round(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+      const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+
+      if (Math.abs(diffSeconds) < 60) {
+        return rtf.format(-diffSeconds, 'second');
+      } else if (Math.abs(diffMinutes) < 60) {
+        return rtf.format(-diffMinutes, 'minute');
+      } else if (Math.abs(diffHours) < 24) {
+        return rtf.format(-diffHours, 'hour');
+      } else {
+        return rtf.format(-diffDays, 'day');
+      }
     } catch {
       return dateString;
     }
@@ -645,8 +678,12 @@ export class ScionPageAgentDetail extends LitElement {
             <span class="info-value">${this.formatDate(this.agent.createdAt)}</span>
           </div>
           <div class="info-item">
-            <span class="info-label">Updated</span>
-            <span class="info-value">${this.formatDate(this.agent.updatedAt)}</span>
+            <span class="info-label">Last Seen</span>
+            <span class="info-value"
+              >${this.agent.lastSeen
+                ? this.formatRelativeTime(this.agent.lastSeen)
+                : this.formatRelativeTime(this.agent.updatedAt)}</span
+            >
           </div>
         </div>
 
@@ -673,7 +710,10 @@ export class ScionPageAgentDetail extends LitElement {
                 ${this.agent.status.charAt(0).toUpperCase() + this.agent.status.slice(1)}
               </div>
               <div class="timeline-time">
-                Last updated: ${this.formatDate(this.agent.updatedAt)}
+                Last updated:
+                ${this.agent.lastSeen
+                  ? this.formatRelativeTime(this.agent.lastSeen)
+                  : this.formatRelativeTime(this.agent.updatedAt)}
               </div>
             </div>
           </div>

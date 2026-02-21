@@ -72,7 +72,16 @@ export interface Grove {
 /**
  * Agent status enumeration
  */
-export type AgentStatus = 'running' | 'stopped' | 'provisioning' | 'cloning' | 'error' | 'idle' | 'busy' | 'waiting_for_input' | 'completed';
+export type AgentStatus =
+  | 'running'
+  | 'stopped'
+  | 'provisioning'
+  | 'cloning'
+  | 'error'
+  | 'idle'
+  | 'busy'
+  | 'waiting_for_input'
+  | 'completed';
 
 /**
  * Agent information from the Hub API
@@ -84,6 +93,7 @@ export interface Agent {
   template: string;
   status: AgentStatus;
   taskSummary?: string;
+  lastSeen?: string;
   createdAt: string;
   updatedAt: string;
 }
