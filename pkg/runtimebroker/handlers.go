@@ -318,6 +318,70 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Env-gather: if GatherEnv is true, evaluate env completeness
+	if req.GatherEnv {
+		required := s.extractRequiredEnvKeys(req)
+		if len(required) > 0 {
+			var hubHas, brokerHas, needs []string
+			for _, key := range required {
+				val, hasVal := env[key]
+				if hasVal && val != "" {
+					// Determine source
+					if _, fromHub := req.ResolvedEnv[key]; fromHub {
+						hubHas = append(hubHas, key)
+					} else {
+						brokerHas = append(brokerHas, key)
+					}
+				} else {
+					// Check if broker can supply from its own env
+					if brokerVal := os.Getenv(key); brokerVal != "" {
+						env[key] = brokerVal
+						brokerHas = append(brokerHas, key)
+					} else {
+						needs = append(needs, key)
+					}
+				}
+			}
+
+			if len(needs) > 0 {
+				// Store pending state for finalize-env
+				s.pendingEnvGatherMu.Lock()
+				s.pendingEnvGather[req.Name] = &pendingAgentState{
+					Request:   &req,
+					MergedEnv: env,
+					CreatedAt: time.Now(),
+				}
+				s.pendingEnvGatherMu.Unlock()
+
+				if s.config.Debug {
+					slog.Debug("Env-gather: returning 202 with requirements",
+						"required", required,
+						"hubHas", hubHas,
+						"brokerHas", brokerHas,
+						"needs", needs,
+					)
+				}
+
+				writeJSON(w, http.StatusAccepted, EnvRequirementsResponse{
+					AgentID:   req.ID,
+					Required:  required,
+					HubHas:    hubHas,
+					BrokerHas: brokerHas,
+					Needs:     needs,
+				})
+				return
+			}
+
+			if s.config.Debug {
+				slog.Debug("Env-gather: all required keys satisfied, proceeding with start",
+					"required", required,
+					"hubHas", hubHas,
+					"brokerHas", brokerHas,
+				)
+			}
+		}
+	}
+
 	opts := api.StartOptions{
 		Name:      req.Name,
 		Detached:  boolPtr(!req.Attach),
@@ -590,6 +654,8 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request, id, a
 		s.getStats(w, r, id)
 	case "has-prompt":
 		s.checkAgentPrompt(w, r, id)
+	case "finalize-env":
+		s.finalizeEnv(w, r, id)
 	default:
 		NotFound(w, "Action")
 	}
@@ -839,6 +905,159 @@ func (s *Server) checkAgentPrompt(w http.ResponseWriter, r *http.Request, id str
 
 	hasPrompt := len(strings.TrimSpace(string(content))) > 0
 	writeJSON(w, http.StatusOK, HasPromptResponse{HasPrompt: hasPrompt})
+}
+
+// extractRequiredEnvKeys determines the set of env keys required by the agent's
+// template and settings profile. Keys with empty values in the settings config
+// indicate required-but-unsatisfied variables.
+func (s *Server) extractRequiredEnvKeys(req CreateAgentRequest) []string {
+	required := make(map[string]struct{})
+
+	// Load settings from grove path if available
+	if req.GrovePath != "" {
+		settings, _, err := config.LoadEffectiveSettings(req.GrovePath)
+		if err == nil && settings != nil {
+			profileName := ""
+			if req.Config != nil {
+				profileName = req.Config.Profile
+			}
+			if profileName == "" {
+				profileName = settings.ActiveProfile
+			}
+
+			// Get profile env keys
+			if profileName != "" && settings.Profiles != nil {
+				if profile, ok := settings.Profiles[profileName]; ok {
+					for k, v := range profile.Env {
+						if v == "" {
+							required[k] = struct{}{}
+						}
+					}
+					// Check harness overrides within the profile
+					for _, override := range profile.HarnessOverrides {
+						for k, v := range override.Env {
+							if v == "" {
+								required[k] = struct{}{}
+							}
+						}
+					}
+				}
+			}
+
+			// Get harness config env keys
+			for _, hcfg := range settings.HarnessConfigs {
+				for k, v := range hcfg.Env {
+					if v == "" {
+						required[k] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+
+	keys := make([]string, 0, len(required))
+	for k := range required {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// finalizeEnv handles the second phase of env-gather: receiving gathered env vars
+// from the Hub and starting the agent with the complete environment.
+func (s *Server) finalizeEnv(w http.ResponseWriter, r *http.Request, id string) {
+	ctx := r.Context()
+
+	var req FinalizeEnvRequest
+	if err := readJSON(r, &req); err != nil {
+		BadRequest(w, "Invalid request body: "+err.Error())
+		return
+	}
+
+	// Look up pending state
+	s.pendingEnvGatherMu.Lock()
+	pending, ok := s.pendingEnvGather[id]
+	if ok {
+		delete(s.pendingEnvGather, id)
+	}
+	s.pendingEnvGatherMu.Unlock()
+
+	if !ok {
+		NotFound(w, "Pending agent")
+		return
+	}
+
+	// Merge gathered env into the previously merged env
+	for k, v := range req.Env {
+		pending.MergedEnv[k] = v
+	}
+
+	if s.config.Debug {
+		slog.Debug("Finalize-env: merging gathered env", "gatheredKeys", len(req.Env), "totalEnv", len(pending.MergedEnv))
+	}
+
+	// Build start options from the pending request
+	origReq := pending.Request
+	opts := api.StartOptions{
+		Name:      origReq.Name,
+		Detached:  boolPtr(!origReq.Attach),
+		GrovePath: origReq.GrovePath,
+	}
+
+	if origReq.Config != nil {
+		opts.Template = origReq.Config.Template
+		opts.Image = origReq.Config.Image
+		opts.Task = origReq.Config.Task
+		opts.Workspace = origReq.Config.Workspace
+		opts.Profile = origReq.Config.Profile
+	}
+
+	// Hydrate template if needed
+	if s.hydrator != nil && origReq.Config != nil {
+		templatePath, err := s.hydrateTemplate(ctx, origReq.Config)
+		if err != nil {
+			TemplateError(w, "Failed to hydrate template: "+err.Error())
+			return
+		}
+		if templatePath != "" {
+			opts.Template = templatePath
+		}
+	}
+
+	// Git clone mode
+	if origReq.Config != nil && origReq.Config.GitClone != nil {
+		gc := origReq.Config.GitClone
+		pending.MergedEnv["SCION_GIT_CLONE_URL"] = gc.URL
+		if gc.Branch != "" {
+			pending.MergedEnv["SCION_GIT_BRANCH"] = gc.Branch
+		}
+		if gc.Depth > 0 {
+			pending.MergedEnv["SCION_GIT_DEPTH"] = strconv.Itoa(gc.Depth)
+		}
+		opts.Workspace = ""
+		opts.GrovePath = ""
+		opts.GitClone = gc
+	}
+
+	opts.Env = pending.MergedEnv
+
+	// Pass through resolved secrets
+	if len(origReq.ResolvedSecrets) > 0 {
+		opts.ResolvedSecrets = origReq.ResolvedSecrets
+	}
+
+	// Start the agent
+	agentInfo, err := s.manager.Start(ctx, opts)
+	if err != nil {
+		RuntimeError(w, "Failed to create agent: "+err.Error())
+		return
+	}
+
+	resp := CreateAgentResponse{
+		Agent:   agentInfoPtr(AgentInfoToResponse(*agentInfo)),
+		Created: true,
+	}
+
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // Helper functions

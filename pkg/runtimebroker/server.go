@@ -164,17 +164,30 @@ type Server struct {
 
 	// Control channel
 	controlChannel *ControlChannelClient
+
+	// Pending env-gather state: agents waiting for env var submission.
+	// Keyed by agent name (used as agent identifier on the broker).
+	pendingEnvGather   map[string]*pendingAgentState
+	pendingEnvGatherMu sync.Mutex
+}
+
+// pendingAgentState holds the partial state for an agent waiting on env-gather.
+type pendingAgentState struct {
+	Request   *CreateAgentRequest
+	MergedEnv map[string]string
+	CreatedAt time.Time
 }
 
 // New creates a new Runtime Broker API server.
 func New(cfg ServerConfig, mgr agent.Manager, rt runtime.Runtime) *Server {
 	srv := &Server{
-		config:    cfg,
-		manager:   mgr,
-		runtime:   rt,
-		mux:       http.NewServeMux(),
-		startTime: time.Now(),
-		version:   "0.1.0", // TODO: Get from build info
+		config:           cfg,
+		manager:          mgr,
+		runtime:          rt,
+		mux:              http.NewServeMux(),
+		startTime:        time.Now(),
+		version:          "0.1.0", // TODO: Get from build info
+		pendingEnvGather: make(map[string]*pendingAgentState),
 	}
 
 	// Initialize Hub integration if enabled
