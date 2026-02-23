@@ -125,6 +125,20 @@ export class ScionPageAgentCreate extends LitElement {
       width: 100%;
     }
 
+    .form-field sl-select::part(combobox) {
+      cursor: pointer;
+    }
+
+    .form-field sl-select::part(expand-icon) {
+      font-size: 1.25rem;
+      color: var(--scion-text-secondary, #475569);
+      border-left: 1px solid var(--scion-border, #e2e8f0);
+      padding: 0 0.625rem;
+      margin-left: 0.5rem;
+      background: var(--scion-bg-subtle, #f1f5f9);
+      border-radius: 0 var(--scion-radius, 0.5rem) var(--scion-radius, 0.5rem) 0;
+    }
+
     .broker-option {
       display: flex;
       align-items: center;
