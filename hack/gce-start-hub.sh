@@ -19,7 +19,7 @@ set -euo pipefail
 
 INSTANCE_NAME="scion-demo"
 ZONE="us-central1-a"
-PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
+PROJECT_ID="deploy-demo-test"
 DOMAIN="hub.demo.scion-ai.dev"
 REPO_DIR="/home/scion/scion-agent"
 SCION_BIN="/usr/local/bin/scion"
