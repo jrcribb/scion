@@ -456,6 +456,47 @@ func TestDemoPolicy_GroveCreationSetsUpMembersGroupAndPolicy(t *testing.T) {
 	assert.Equal(t, 1, policies.TotalCount, "grove member-create-agents policy should exist")
 }
 
+// TestDemoPolicy_EndToEnd_GroveCreatorCanCreateAgent tests the complete flow:
+// a non-admin user creates a grove via the HTTP API and then creates an agent
+// in that grove. This exercises the full handler chain including authorization.
+func TestDemoPolicy_EndToEnd_GroveCreatorCanCreateAgent(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	// Create a non-admin user
+	alice := &store.User{
+		ID:          "user-e2e-alice",
+		Email:       "e2e-alice@test.com",
+		DisplayName: "E2E Alice",
+		Role:        store.UserRoleMember,
+		Status:      "active",
+		Created:     time.Now(),
+	}
+	require.NoError(t, s.CreateUser(ctx, alice))
+	ensureHubMembership(ctx, s, alice.ID)
+
+	// Step 1: Create a grove via the HTTP handler (as alice)
+	groveRec := doRequestAsUser(t, srv, alice, http.MethodPost, "/api/v1/groves", CreateGroveRequest{
+		Name: "E2E Test Grove",
+	})
+	require.Equal(t, http.StatusCreated, groveRec.Code,
+		"grove creation should succeed; got: %s", groveRec.Body.String())
+
+	var grove store.Grove
+	require.NoError(t, json.NewDecoder(groveRec.Body).Decode(&grove))
+
+	// Step 2: Create an agent in the grove via the HTTP handler (as alice)
+	agentRec := doRequestAsUser(t, srv, alice, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "e2e-test-agent",
+		GroveID: grove.ID,
+	})
+
+	// The agent creation may fail downstream (no broker/template), but should
+	// NOT fail with 403 — the grove creator must have permission.
+	assert.NotEqual(t, http.StatusForbidden, agentRec.Code,
+		"grove creator should not get 403 when creating agent in own grove; got: %s", agentRec.Body.String())
+}
+
 func TestDemoPolicy_HubMembershipOnLogin(t *testing.T) {
 	_, s := testServer(t)
 	ctx := context.Background()

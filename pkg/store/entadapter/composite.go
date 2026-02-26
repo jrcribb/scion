@@ -16,8 +16,10 @@ package entadapter
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ptone/scion-agent/pkg/ent"
+	entuser "github.com/ptone/scion-agent/pkg/ent/user"
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
@@ -78,7 +80,147 @@ func (c *CompositeStore) ListGroups(ctx context.Context, filter store.GroupFilte
 }
 
 func (c *CompositeStore) AddGroupMember(ctx context.Context, member *store.GroupMember) error {
+	switch member.MemberType {
+	case store.GroupMemberTypeUser:
+		if err := c.ensureEntUser(ctx, member.MemberID); err != nil {
+			return fmt.Errorf("ensuring user in ent store: %w", err)
+		}
+	case store.GroupMemberTypeAgent:
+		if err := c.ensureEntAgent(ctx, member.MemberID); err != nil {
+			return fmt.Errorf("ensuring agent in ent store: %w", err)
+		}
+	}
 	return c.groups.AddGroupMember(ctx, member)
+}
+
+// ensureEntUser checks if a user exists in the Ent database and, if not,
+// creates a minimal shadow record from the base store. This is needed because
+// the Ent database has foreign key constraints on group memberships, but users
+// may only exist in the base (main SQLite) database.
+func (c *CompositeStore) ensureEntUser(ctx context.Context, userID string) error {
+	uid, err := parseUUID(userID)
+	if err != nil {
+		return err
+	}
+
+	// Check if user already exists in Ent
+	exists, err := c.client.User.Query().Where(entuser.IDEQ(uid)).Exist(ctx)
+	if err != nil {
+		return fmt.Errorf("checking ent user existence: %w", err)
+	}
+	if exists {
+		return nil
+	}
+
+	// Fetch from the base store
+	u, err := c.Store.GetUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("fetching user from base store: %w", err)
+	}
+
+	// Create a minimal shadow record in Ent
+	_, err = c.client.User.Create().
+		SetID(uid).
+		SetEmail(u.Email).
+		SetDisplayName(u.DisplayName).
+		SetRole(entuser.Role(u.Role)).
+		Save(ctx)
+	if err != nil {
+		// Another goroutine may have created it concurrently
+		if ent.IsConstraintError(err) {
+			return nil
+		}
+		return fmt.Errorf("creating shadow user in ent: %w", err)
+	}
+
+	return nil
+}
+
+// ensureEntAgent checks if an agent exists in the Ent database and, if not,
+// creates a minimal shadow record from the base store. The agent's grove is
+// also ensured to exist in Ent since it is a required FK.
+func (c *CompositeStore) ensureEntAgent(ctx context.Context, agentID string) error {
+	uid, err := parseUUID(agentID)
+	if err != nil {
+		return err
+	}
+
+	// Check if agent already exists in Ent
+	_, getErr := c.client.Agent.Get(ctx, uid)
+	if getErr == nil {
+		return nil // already exists
+	}
+	if !ent.IsNotFound(getErr) {
+		return fmt.Errorf("checking ent agent existence: %w", getErr)
+	}
+
+	// Fetch from the base store
+	a, err := c.Store.GetAgent(ctx, agentID)
+	if err != nil {
+		return fmt.Errorf("fetching agent from base store: %w", err)
+	}
+
+	// Ensure the grove exists in Ent first (required FK)
+	if err := c.ensureEntGrove(ctx, a.GroveID); err != nil {
+		return fmt.Errorf("ensuring grove in ent store: %w", err)
+	}
+
+	groveUID, err := parseUUID(a.GroveID)
+	if err != nil {
+		return err
+	}
+
+	// Create a minimal shadow record in Ent
+	_, err = c.client.Agent.Create().
+		SetID(uid).
+		SetName(a.Name).
+		SetSlug(a.Slug).
+		SetGroveID(groveUID).
+		Save(ctx)
+	if err != nil {
+		if ent.IsConstraintError(err) {
+			return nil
+		}
+		return fmt.Errorf("creating shadow agent in ent: %w", err)
+	}
+
+	return nil
+}
+
+// ensureEntGrove checks if a grove exists in the Ent database and, if not,
+// creates a minimal shadow record from the base store.
+func (c *CompositeStore) ensureEntGrove(ctx context.Context, groveID string) error {
+	uid, err := parseUUID(groveID)
+	if err != nil {
+		return err
+	}
+
+	_, getErr := c.client.Grove.Get(ctx, uid)
+	if getErr == nil {
+		return nil
+	}
+	if !ent.IsNotFound(getErr) {
+		return fmt.Errorf("checking ent grove existence: %w", getErr)
+	}
+
+	g, err := c.Store.GetGrove(ctx, groveID)
+	if err != nil {
+		return fmt.Errorf("fetching grove from base store: %w", err)
+	}
+
+	_, err = c.client.Grove.Create().
+		SetID(uid).
+		SetName(g.Name).
+		SetSlug(g.Slug).
+		Save(ctx)
+	if err != nil {
+		if ent.IsConstraintError(err) {
+			return nil
+		}
+		return fmt.Errorf("creating shadow grove in ent: %w", err)
+	}
+
+	return nil
 }
 
 func (c *CompositeStore) RemoveGroupMember(ctx context.Context, groupID, memberType, memberID string) error {
