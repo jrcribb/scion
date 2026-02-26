@@ -179,8 +179,8 @@ export class ScionStatusBadge extends LitElement {
     }
 
     .badge.neutral {
-      background: var(--scion-neutral-100, #f1f5f9);
-      color: var(--scion-neutral-600, #475569);
+      background: var(--scion-neutral-200, #e2e8f0);
+      color: var(--scion-neutral-700, #334155);
     }
 
     /* Pulse indicator */

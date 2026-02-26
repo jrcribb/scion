@@ -160,7 +160,7 @@ export class ScionPageAgents extends LitElement {
       border-radius: var(--scion-radius-lg, 0.75rem);
     }
 
-    .empty-state sl-icon {
+    .empty-state > sl-icon {
       font-size: 4rem;
       color: var(--scion-text-muted, #64748b);
       opacity: 0.5;

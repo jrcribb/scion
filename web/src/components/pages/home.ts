@@ -222,7 +222,7 @@ export class ScionPageHome extends LitElement {
       color: var(--scion-text-muted, #64748b);
     }
 
-    .empty-state sl-icon {
+    .empty-state > sl-icon {
       font-size: 3rem;
       margin-bottom: 1rem;
       opacity: 0.5;

@@ -281,7 +281,7 @@ export class ScionPageGroveDetail extends LitElement {
       border-radius: var(--scion-radius-lg, 0.75rem);
     }
 
-    .empty-state sl-icon {
+    .empty-state > sl-icon {
       font-size: 4rem;
       color: var(--scion-text-muted, #64748b);
       opacity: 0.5;
@@ -453,7 +453,7 @@ export class ScionPageGroveDetail extends LitElement {
       border-radius: var(--scion-radius-lg, 0.75rem);
     }
 
-    .workspace-empty sl-icon {
+    .workspace-empty > sl-icon {
       font-size: 2.5rem;
       color: var(--scion-text-muted, #64748b);
       opacity: 0.5;
@@ -994,7 +994,7 @@ export class ScionPageGroveDetail extends LitElement {
         <a href="/agents/new?groveId=${this.groveId}" style="text-decoration: none;">
           <sl-button variant="primary">
             <sl-icon slot="prefix" name="plus-lg"></sl-icon>
-            Create Agent
+            New Agent
           </sl-button>
         </a>
       </div>
