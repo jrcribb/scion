@@ -3618,6 +3618,130 @@ type SetEnvVarResponse struct {
 	Created bool          `json:"created"`
 }
 
+// resolveEnvSecretAccess resolves the scopeID and enforces authorization for
+// env var and secret endpoints. It returns the resolved scopeID and true on
+// success, or writes an HTTP error and returns false on failure.
+//
+// For user scope: extracts the authenticated user's ID as scopeID (ignoring
+// any client-supplied value). No CheckAccess call needed — identity enforcement
+// is the access control.
+//
+// For grove scope: verifies the grove exists, then checks authorization. Users
+// must pass CheckAccess (with owner bypass). Agents get read-only access to
+// their own grove only.
+//
+// For broker scope: verifies the broker exists. Brokers get self-access via
+// BrokerIdentity. Users must pass CheckAccess.
+func (s *Server) resolveEnvSecretAccess(w http.ResponseWriter, r *http.Request, scope, clientScopeID string, isWrite bool) (string, bool) {
+	ctx := r.Context()
+
+	switch scope {
+	case store.ScopeUser:
+		userIdent := GetUserIdentityFromContext(ctx)
+		if userIdent == nil {
+			Unauthorized(w)
+			return "", false
+		}
+		return userIdent.ID(), true
+
+	case store.ScopeGrove:
+		if clientScopeID == "" {
+			BadRequest(w, "scopeId is required for grove scope")
+			return "", false
+		}
+		grove, err := s.store.GetGrove(ctx, clientScopeID)
+		if err != nil {
+			if err == store.ErrNotFound {
+				NotFound(w, "Grove")
+			} else {
+				writeErrorFromErr(w, err, "")
+			}
+			return "", false
+		}
+		identity := GetIdentityFromContext(ctx)
+		if identity == nil {
+			Unauthorized(w)
+			return "", false
+		}
+		if agentIdent, ok := identity.(AgentIdentity); ok {
+			if isWrite {
+				Forbidden(w)
+				return "", false
+			}
+			if agentIdent.GroveID() != clientScopeID {
+				Forbidden(w)
+				return "", false
+			}
+			return clientScopeID, true
+		}
+		if userIdent, ok := identity.(UserIdentity); ok {
+			action := ActionRead
+			if isWrite {
+				action = ActionUpdate
+			}
+			decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+				Type:    "grove",
+				ID:      grove.ID,
+				OwnerID: grove.OwnerID,
+			}, action)
+			if !decision.Allowed {
+				Forbidden(w)
+				return "", false
+			}
+			return clientScopeID, true
+		}
+		Forbidden(w)
+		return "", false
+
+	case store.ScopeRuntimeBroker:
+		if clientScopeID == "" {
+			BadRequest(w, "scopeId is required for runtime_broker scope")
+			return "", false
+		}
+		_, err := s.store.GetRuntimeBroker(ctx, clientScopeID)
+		if err != nil {
+			if err == store.ErrNotFound {
+				NotFound(w, "RuntimeBroker")
+			} else {
+				writeErrorFromErr(w, err, "")
+			}
+			return "", false
+		}
+		// Broker self-access
+		if brokerIdent := GetBrokerIdentityFromContext(ctx); brokerIdent != nil {
+			if brokerIdent.BrokerID() == clientScopeID {
+				return clientScopeID, true
+			}
+		}
+		identity := GetIdentityFromContext(ctx)
+		if identity == nil {
+			Unauthorized(w)
+			return "", false
+		}
+		if userIdent, ok := identity.(UserIdentity); ok {
+			action := ActionRead
+			if isWrite {
+				action = ActionUpdate
+			}
+			decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+				Type: "runtime_broker",
+				ID:   clientScopeID,
+			}, action)
+			if !decision.Allowed {
+				Forbidden(w)
+				return "", false
+			}
+			return clientScopeID, true
+		}
+		Forbidden(w)
+		return "", false
+
+	default:
+		BadRequest(w, "invalid scope: "+scope)
+		return "", false
+	}
+}
+
 func (s *Server) handleEnvVars(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -3635,11 +3759,10 @@ func (s *Server) listEnvVars(w http.ResponseWriter, r *http.Request) {
 	if scope == "" {
 		scope = store.ScopeUser
 	}
-	scopeID := query.Get("scopeId")
 
-	// For user scope, use authenticated user ID (placeholder for now)
-	if scope == store.ScopeUser && scopeID == "" {
-		scopeID = "default" // TODO: Get from auth context
+	scopeID, ok := s.resolveEnvSecretAccess(w, r, scope, query.Get("scopeId"), false)
+	if !ok {
+		return
 	}
 
 	filter := store.EnvVarFilter{
@@ -3696,9 +3819,10 @@ func (s *Server) getEnvVar(w http.ResponseWriter, r *http.Request, key string) {
 	if scope == "" {
 		scope = store.ScopeUser
 	}
-	scopeID := query.Get("scopeId")
-	if scope == store.ScopeUser && scopeID == "" {
-		scopeID = "default" // TODO: Get from auth context
+
+	scopeID, ok := s.resolveEnvSecretAccess(w, r, scope, query.Get("scopeId"), false)
+	if !ok {
+		return
 	}
 
 	envVar, err := s.store.GetEnvVar(ctx, key, scope, scopeID)
@@ -3733,9 +3857,10 @@ func (s *Server) setEnvVar(w http.ResponseWriter, r *http.Request, key string) {
 	if scope == "" {
 		scope = store.ScopeUser
 	}
-	scopeID := req.ScopeID
-	if scope == store.ScopeUser && scopeID == "" {
-		scopeID = "default" // TODO: Get from auth context
+
+	scopeID, ok := s.resolveEnvSecretAccess(w, r, scope, req.ScopeID, true)
+	if !ok {
+		return
 	}
 
 	injectionMode := req.InjectionMode
@@ -3758,6 +3883,11 @@ func (s *Server) setEnvVar(w http.ResponseWriter, r *http.Request, key string) {
 		Sensitive:     sensitive,
 		InjectionMode: injectionMode,
 		Secret:        req.Secret,
+	}
+
+	// Populate CreatedBy from authenticated user
+	if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+		envVar.CreatedBy = userIdent.ID()
 	}
 
 	created, err := s.store.UpsertEnvVar(ctx, envVar)
@@ -3785,9 +3915,10 @@ func (s *Server) deleteEnvVar(w http.ResponseWriter, r *http.Request, key string
 	if scope == "" {
 		scope = store.ScopeUser
 	}
-	scopeID := query.Get("scopeId")
-	if scope == store.ScopeUser && scopeID == "" {
-		scopeID = "default" // TODO: Get from auth context
+
+	scopeID, ok := s.resolveEnvSecretAccess(w, r, scope, query.Get("scopeId"), true)
+	if !ok {
+		return
 	}
 
 	if err := s.store.DeleteEnvVar(ctx, key, scope, scopeID); err != nil {
@@ -3857,9 +3988,10 @@ func (s *Server) listSecrets(w http.ResponseWriter, r *http.Request) {
 	if scope == "" {
 		scope = store.ScopeUser
 	}
-	scopeID := query.Get("scopeId")
-	if scope == store.ScopeUser && scopeID == "" {
-		scopeID = "default" // TODO: Get from auth context
+
+	scopeID, ok := s.resolveEnvSecretAccess(w, r, scope, query.Get("scopeId"), false)
+	if !ok {
+		return
 	}
 
 	metas, err := s.secretBackend.List(ctx, secret.Filter{
@@ -3912,9 +4044,10 @@ func (s *Server) getSecret(w http.ResponseWriter, r *http.Request, key string) {
 	if scope == "" {
 		scope = store.ScopeUser
 	}
-	scopeID := query.Get("scopeId")
-	if scope == store.ScopeUser && scopeID == "" {
-		scopeID = "default" // TODO: Get from auth context
+
+	scopeID, ok := s.resolveEnvSecretAccess(w, r, scope, query.Get("scopeId"), false)
+	if !ok {
+		return
 	}
 
 	meta, err := s.secretBackend.GetMeta(ctx, key, scope, scopeID)
@@ -3985,9 +4118,10 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request, key string) {
 	if scope == "" {
 		scope = store.ScopeUser
 	}
-	scopeID := req.ScopeID
-	if scope == store.ScopeUser && scopeID == "" {
-		scopeID = "default" // TODO: Get from auth context
+
+	scopeID, ok := s.resolveEnvSecretAccess(w, r, scope, req.ScopeID, true)
+	if !ok {
+		return
 	}
 
 	input := &secret.SetSecretInput{
@@ -3999,6 +4133,13 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request, key string) {
 		ScopeID:     scopeID,
 		Description: req.Description,
 	}
+
+	// Populate CreatedBy/UpdatedBy from authenticated user
+	if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+		input.CreatedBy = userIdent.ID()
+		input.UpdatedBy = userIdent.ID()
+	}
+
 	created, meta, err := s.secretBackend.Set(ctx, input)
 	if err != nil {
 		writeErrorFromErr(w, err, "")
@@ -4019,9 +4160,10 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request, key string
 	if scope == "" {
 		scope = store.ScopeUser
 	}
-	scopeID := query.Get("scopeId")
-	if scope == store.ScopeUser && scopeID == "" {
-		scopeID = "default" // TODO: Get from auth context
+
+	scopeID, ok := s.resolveEnvSecretAccess(w, r, scope, query.Get("scopeId"), true)
+	if !ok {
+		return
 	}
 
 	if err := s.secretBackend.Delete(ctx, key, scope, scopeID); err != nil {
@@ -4040,13 +4182,40 @@ func (s *Server) handleGroveEnvVars(w http.ResponseWriter, r *http.Request, grov
 	ctx := r.Context()
 
 	// Verify grove exists
-	_, err := s.store.GetGrove(ctx, groveID)
+	grove, err := s.store.GetGrove(ctx, groveID)
 	if err != nil {
 		if err == store.ErrNotFound {
 			NotFound(w, "Grove")
 			return
 		}
 		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	// Authorize access
+	identity := GetIdentityFromContext(ctx)
+	if identity == nil {
+		Unauthorized(w)
+		return
+	}
+	if agentIdent, ok := identity.(AgentIdentity); ok {
+		if agentIdent.GroveID() != groveID {
+			Forbidden(w)
+			return
+		}
+		// Agents only get read access
+	} else if userIdent, ok := identity.(UserIdentity); ok {
+		decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+			Type:    "grove",
+			ID:      grove.ID,
+			OwnerID: grove.OwnerID,
+		}, ActionRead)
+		if !decision.Allowed {
+			Forbidden(w)
+			return
+		}
+	} else {
+		Forbidden(w)
 		return
 	}
 
@@ -4080,13 +4249,48 @@ func (s *Server) handleGroveEnvVarByKey(w http.ResponseWriter, r *http.Request, 
 	ctx := r.Context()
 
 	// Verify grove exists
-	_, err := s.store.GetGrove(ctx, groveID)
+	grove, err := s.store.GetGrove(ctx, groveID)
 	if err != nil {
 		if err == store.ErrNotFound {
 			NotFound(w, "Grove")
 			return
 		}
 		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	// Authorize access
+	isWrite := r.Method == http.MethodPut || r.Method == http.MethodDelete
+	identity := GetIdentityFromContext(ctx)
+	if identity == nil {
+		Unauthorized(w)
+		return
+	}
+	if agentIdent, ok := identity.(AgentIdentity); ok {
+		if isWrite {
+			Forbidden(w)
+			return
+		}
+		if agentIdent.GroveID() != groveID {
+			Forbidden(w)
+			return
+		}
+	} else if userIdent, ok := identity.(UserIdentity); ok {
+		action := ActionRead
+		if isWrite {
+			action = ActionUpdate
+		}
+		decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+			Type:    "grove",
+			ID:      grove.ID,
+			OwnerID: grove.OwnerID,
+		}, action)
+		if !decision.Allowed {
+			Forbidden(w)
+			return
+		}
+	} else {
+		Forbidden(w)
 		return
 	}
 
@@ -4131,6 +4335,9 @@ func (s *Server) handleGroveEnvVarByKey(w http.ResponseWriter, r *http.Request, 
 			InjectionMode: groveInjectionMode,
 			Secret:        req.Secret,
 		}
+		if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+			envVar.CreatedBy = userIdent.ID()
+		}
 		created, err := s.store.UpsertEnvVar(ctx, envVar)
 		if err != nil {
 			writeErrorFromErr(w, err, "")
@@ -4157,13 +4364,40 @@ func (s *Server) handleGroveSecrets(w http.ResponseWriter, r *http.Request, grov
 	ctx := r.Context()
 
 	// Verify grove exists
-	_, err := s.store.GetGrove(ctx, groveID)
+	grove, err := s.store.GetGrove(ctx, groveID)
 	if err != nil {
 		if err == store.ErrNotFound {
 			NotFound(w, "Grove")
 			return
 		}
 		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	// Authorize access
+	identity := GetIdentityFromContext(ctx)
+	if identity == nil {
+		Unauthorized(w)
+		return
+	}
+	if agentIdent, ok := identity.(AgentIdentity); ok {
+		if agentIdent.GroveID() != groveID {
+			Forbidden(w)
+			return
+		}
+		// Agents only get read access
+	} else if userIdent, ok := identity.(UserIdentity); ok {
+		decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+			Type:    "grove",
+			ID:      grove.ID,
+			OwnerID: grove.OwnerID,
+		}, ActionRead)
+		if !decision.Allowed {
+			Forbidden(w)
+			return
+		}
+	} else {
+		Forbidden(w)
 		return
 	}
 
@@ -4195,13 +4429,48 @@ func (s *Server) handleGroveSecretByKey(w http.ResponseWriter, r *http.Request, 
 	ctx := r.Context()
 
 	// Verify grove exists
-	_, err := s.store.GetGrove(ctx, groveID)
+	grove, err := s.store.GetGrove(ctx, groveID)
 	if err != nil {
 		if err == store.ErrNotFound {
 			NotFound(w, "Grove")
 			return
 		}
 		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	// Authorize access
+	isWrite := r.Method == http.MethodPut || r.Method == http.MethodDelete
+	identity := GetIdentityFromContext(ctx)
+	if identity == nil {
+		Unauthorized(w)
+		return
+	}
+	if agentIdent, ok := identity.(AgentIdentity); ok {
+		if isWrite {
+			Forbidden(w)
+			return
+		}
+		if agentIdent.GroveID() != groveID {
+			Forbidden(w)
+			return
+		}
+	} else if userIdent, ok := identity.(UserIdentity); ok {
+		action := ActionRead
+		if isWrite {
+			action = ActionUpdate
+		}
+		decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+			Type:    "grove",
+			ID:      grove.ID,
+			OwnerID: grove.OwnerID,
+		}, action)
+		if !decision.Allowed {
+			Forbidden(w)
+			return
+		}
+	} else {
+		Forbidden(w)
 		return
 	}
 
@@ -4256,6 +4525,10 @@ func (s *Server) handleGroveSecretByKey(w http.ResponseWriter, r *http.Request, 
 			Scope:       store.ScopeGrove,
 			ScopeID:     groveID,
 			Description: req.Description,
+		}
+		if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+			input.CreatedBy = userIdent.ID()
+			input.UpdatedBy = userIdent.ID()
 		}
 		created, meta, err := s.secretBackend.Set(ctx, input)
 		if err != nil {
@@ -4476,6 +4749,30 @@ func (s *Server) handleBrokerEnvVars(w http.ResponseWriter, r *http.Request, bro
 		return
 	}
 
+	// Authorize access: broker self-access or user CheckAccess
+	if brokerIdent := GetBrokerIdentityFromContext(ctx); brokerIdent != nil && brokerIdent.BrokerID() == brokerID {
+		// Broker accessing its own env vars — allowed
+	} else {
+		identity := GetIdentityFromContext(ctx)
+		if identity == nil {
+			Unauthorized(w)
+			return
+		}
+		if userIdent, ok := identity.(UserIdentity); ok {
+			decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+				Type: "runtime_broker",
+				ID:   brokerID,
+			}, ActionRead)
+			if !decision.Allowed {
+				Forbidden(w)
+				return
+			}
+		} else {
+			Forbidden(w)
+			return
+		}
+	}
+
 	switch r.Method {
 	case http.MethodGet:
 		envVars, err := s.store.ListEnvVars(ctx, store.EnvVarFilter{
@@ -4513,6 +4810,35 @@ func (s *Server) handleBrokerEnvVarByKey(w http.ResponseWriter, r *http.Request,
 		}
 		writeErrorFromErr(w, err, "")
 		return
+	}
+
+	// Authorize access: broker self-access or user CheckAccess
+	isWrite := r.Method == http.MethodPut || r.Method == http.MethodDelete
+	if brokerIdent := GetBrokerIdentityFromContext(ctx); brokerIdent != nil && brokerIdent.BrokerID() == brokerID {
+		// Broker accessing its own env vars — allowed
+	} else {
+		identity := GetIdentityFromContext(ctx)
+		if identity == nil {
+			Unauthorized(w)
+			return
+		}
+		if userIdent, ok := identity.(UserIdentity); ok {
+			action := ActionRead
+			if isWrite {
+				action = ActionUpdate
+			}
+			decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+				Type: "runtime_broker",
+				ID:   brokerID,
+			}, action)
+			if !decision.Allowed {
+				Forbidden(w)
+				return
+			}
+		} else {
+			Forbidden(w)
+			return
+		}
 	}
 
 	switch r.Method {
@@ -4556,6 +4882,9 @@ func (s *Server) handleBrokerEnvVarByKey(w http.ResponseWriter, r *http.Request,
 			InjectionMode: brokerInjectionMode,
 			Secret:        req.Secret,
 		}
+		if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+			envVar.CreatedBy = userIdent.ID()
+		}
 		created, err := s.store.UpsertEnvVar(ctx, envVar)
 		if err != nil {
 			writeErrorFromErr(w, err, "")
@@ -4590,6 +4919,30 @@ func (s *Server) handleBrokerSecrets(w http.ResponseWriter, r *http.Request, bro
 		}
 		writeErrorFromErr(w, err, "")
 		return
+	}
+
+	// Authorize access: broker self-access or user CheckAccess
+	if brokerIdent := GetBrokerIdentityFromContext(ctx); brokerIdent != nil && brokerIdent.BrokerID() == brokerID {
+		// Broker accessing its own secrets — allowed
+	} else {
+		identity := GetIdentityFromContext(ctx)
+		if identity == nil {
+			Unauthorized(w)
+			return
+		}
+		if userIdent, ok := identity.(UserIdentity); ok {
+			decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+				Type: "runtime_broker",
+				ID:   brokerID,
+			}, ActionRead)
+			if !decision.Allowed {
+				Forbidden(w)
+				return
+			}
+		} else {
+			Forbidden(w)
+			return
+		}
 	}
 
 	switch r.Method {
@@ -4628,6 +4981,35 @@ func (s *Server) handleBrokerSecretByKey(w http.ResponseWriter, r *http.Request,
 		}
 		writeErrorFromErr(w, err, "")
 		return
+	}
+
+	// Authorize access: broker self-access or user CheckAccess
+	isWrite := r.Method == http.MethodPut || r.Method == http.MethodDelete
+	if brokerIdent := GetBrokerIdentityFromContext(ctx); brokerIdent != nil && brokerIdent.BrokerID() == brokerID {
+		// Broker accessing its own secrets — allowed
+	} else {
+		identity := GetIdentityFromContext(ctx)
+		if identity == nil {
+			Unauthorized(w)
+			return
+		}
+		if userIdent, ok := identity.(UserIdentity); ok {
+			action := ActionRead
+			if isWrite {
+				action = ActionUpdate
+			}
+			decision := s.authzService.CheckAccess(ctx, userIdent, Resource{
+				Type: "runtime_broker",
+				ID:   brokerID,
+			}, action)
+			if !decision.Allowed {
+				Forbidden(w)
+				return
+			}
+		} else {
+			Forbidden(w)
+			return
+		}
 	}
 
 	switch r.Method {
@@ -4681,6 +5063,10 @@ func (s *Server) handleBrokerSecretByKey(w http.ResponseWriter, r *http.Request,
 			Scope:       store.ScopeRuntimeBroker,
 			ScopeID:     brokerID,
 			Description: req.Description,
+		}
+		if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+			input.CreatedBy = userIdent.ID()
+			input.UpdatedBy = userIdent.ID()
 		}
 		created, meta, err := s.secretBackend.Set(ctx, input)
 		if err != nil {

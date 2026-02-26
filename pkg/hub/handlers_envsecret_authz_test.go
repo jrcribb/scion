@@ -1,0 +1,713 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//go:build !no_sqlite
+
+package hub
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/ptone/scion-agent/pkg/secret"
+	"github.com/ptone/scion-agent/pkg/store"
+)
+
+// doRequestWithAgentToken performs an HTTP request with an agent JWT token.
+func doRequestWithAgentToken(t *testing.T, srv *Server, method, path string, body interface{}, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	var bodyBytes []byte
+	if body != nil {
+		var err error
+		bodyBytes, err = json.Marshal(body)
+		if err != nil {
+			t.Fatalf("failed to marshal body: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(method, path, bytes.NewReader(bodyBytes))
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-Scion-Agent-Token", token)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+// ============================================================================
+// Env Var Authorization Tests
+// ============================================================================
+
+func TestEnvVar_UserScope_AdminAccess(t *testing.T) {
+	srv, _ := testServer(t)
+
+	// Admin (dev-user) should be able to list env vars (user scope)
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/env?scope=user", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for admin user scope, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ListEnvVarsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	// ScopeID should be the dev-user's ID, not "default"
+	if resp.ScopeID == "default" {
+		t.Error("scopeId should not be 'default' — should be the authenticated user's ID")
+	}
+	if resp.ScopeID != "dev-user" {
+		t.Errorf("expected scopeId 'dev-user', got %q", resp.ScopeID)
+	}
+}
+
+func TestEnvVar_UserScope_MemberAccess(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	member := &store.User{
+		ID:          "member-env-1",
+		Email:       "member-env@example.com",
+		DisplayName: "Test Member",
+		Role:        store.UserRoleMember,
+		Status:      "active",
+		Created:     time.Now(),
+	}
+	if err := s.CreateUser(ctx, member); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	// Member should be able to list their own env vars
+	rec := doRequestAsUser(t, srv, member, http.MethodGet, "/api/v1/env?scope=user", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for member user scope, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ListEnvVarsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.ScopeID != "member-env-1" {
+		t.Errorf("expected scopeId 'member-env-1', got %q", resp.ScopeID)
+	}
+}
+
+func TestEnvVar_UserScope_CreateAndGet(t *testing.T) {
+	srv, _ := testServer(t)
+
+	// Create an env var (admin, user scope)
+	body := SetEnvVarRequest{
+		Value:       "test-value",
+		Description: "A test variable",
+	}
+	rec := doRequest(t, srv, http.MethodPut, "/api/v1/env/MY_VAR?scope=user", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var setResp SetEnvVarResponse
+	if err := json.NewDecoder(rec.Body).Decode(&setResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !setResp.Created {
+		t.Error("expected created=true for new env var")
+	}
+
+	// CreatedBy should be populated
+	if setResp.EnvVar.CreatedBy != "dev-user" {
+		t.Errorf("expected createdBy 'dev-user', got %q", setResp.EnvVar.CreatedBy)
+	}
+
+	// Get the env var back
+	rec2 := doRequest(t, srv, http.MethodGet, "/api/v1/env/MY_VAR?scope=user", nil)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+func TestEnvVar_UserScope_Unauthenticated(t *testing.T) {
+	srv, _ := testServer(t)
+
+	// Unauthenticated should get 401
+	rec := doRequestNoAuth(t, srv, http.MethodGet, "/api/v1/env?scope=user", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthenticated, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEnvVar_UserScope_Delete(t *testing.T) {
+	srv, _ := testServer(t)
+
+	// Create an env var first
+	body := SetEnvVarRequest{Value: "to-delete"}
+	rec := doRequest(t, srv, http.MethodPut, "/api/v1/env/DELETE_ME?scope=user", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 creating env var, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Delete it
+	rec2 := doRequest(t, srv, http.MethodDelete, "/api/v1/env/DELETE_ME?scope=user", nil)
+	if rec2.Code != http.StatusNoContent {
+		t.Errorf("expected 204, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+func TestEnvVar_UserScope_MemberIsolation(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	userA := &store.User{
+		ID: "user-iso-a", Email: "a@example.com", DisplayName: "User A",
+		Role: store.UserRoleMember, Status: "active", Created: time.Now(),
+	}
+	userB := &store.User{
+		ID: "user-iso-b", Email: "b@example.com", DisplayName: "User B",
+		Role: store.UserRoleMember, Status: "active", Created: time.Now(),
+	}
+	if err := s.CreateUser(ctx, userA); err != nil {
+		t.Fatalf("failed to create user A: %v", err)
+	}
+	if err := s.CreateUser(ctx, userB); err != nil {
+		t.Fatalf("failed to create user B: %v", err)
+	}
+
+	// User A creates an env var
+	body := SetEnvVarRequest{Value: "user-a-value"}
+	rec := doRequestAsUser(t, srv, userA, http.MethodPut, "/api/v1/env/PRIVATE_VAR?scope=user", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// User A can see it
+	rec2 := doRequestAsUser(t, srv, userA, http.MethodGet, "/api/v1/env?scope=user", nil)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+	var respA ListEnvVarsResponse
+	json.NewDecoder(rec2.Body).Decode(&respA)
+	if len(respA.EnvVars) != 1 {
+		t.Errorf("expected 1 env var for user A, got %d", len(respA.EnvVars))
+	}
+
+	// User B should NOT see user A's env var (different scopeID)
+	rec3 := doRequestAsUser(t, srv, userB, http.MethodGet, "/api/v1/env?scope=user", nil)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec3.Code, rec3.Body.String())
+	}
+	var respB ListEnvVarsResponse
+	json.NewDecoder(rec3.Body).Decode(&respB)
+	if len(respB.EnvVars) != 0 {
+		t.Errorf("expected 0 env vars for user B, got %d", len(respB.EnvVars))
+	}
+}
+
+// ============================================================================
+// Grove-Scoped Env Var Authorization Tests
+// ============================================================================
+
+func TestEnvVar_GroveScope_OwnerAccess(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	owner := &store.User{
+		ID: "grove-owner-1", Email: "owner@example.com", DisplayName: "Owner",
+		Role: store.UserRoleMember, Status: "active", Created: time.Now(),
+	}
+	if err := s.CreateUser(ctx, owner); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	grove := &store.Grove{
+		ID:      "grove_env_owner",
+		Name:    "Owner Test Grove",
+		Slug:    "owner-test-grove",
+		OwnerID: "grove-owner-1",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	// Owner should be able to list grove env vars
+	rec := doRequestAsUser(t, srv, owner, http.MethodGet, "/api/v1/groves/"+grove.ID+"/env", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for grove owner, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Owner should be able to set grove env vars
+	body := SetEnvVarRequest{Value: "grove-val"}
+	rec2 := doRequestAsUser(t, srv, owner, http.MethodPut, "/api/v1/groves/"+grove.ID+"/env/GROVE_VAR", body)
+	if rec2.Code != http.StatusOK {
+		t.Errorf("expected 200 for grove owner write, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+func TestEnvVar_GroveScope_NonOwnerDenied(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	nonOwner := &store.User{
+		ID: "non-owner-1", Email: "nonowner@example.com", DisplayName: "Non-Owner",
+		Role: store.UserRoleMember, Status: "active", Created: time.Now(),
+	}
+	if err := s.CreateUser(ctx, nonOwner); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	grove := &store.Grove{
+		ID:      "grove_env_notown",
+		Name:    "Not Owned Grove",
+		Slug:    "not-owned-grove",
+		OwnerID: "someone-else",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	// Non-owner without policy should be denied
+	rec := doRequestAsUser(t, srv, nonOwner, http.MethodGet, "/api/v1/groves/"+grove.ID+"/env", nil)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for non-owner, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEnvVar_GroveScope_AdminAccess(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID:      "grove_env_admin",
+		Name:    "Admin Test Grove",
+		Slug:    "admin-test-grove",
+		OwnerID: "someone-else",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	// Admin (dev-user) should be able to access any grove
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/groves/"+grove.ID+"/env", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for admin, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEnvVar_GroveScope_AgentReadOwnGrove(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID:      "grove_agent_env",
+		Name:    "Agent Grove",
+		Slug:    "agent-grove",
+		Created: time.Now(),
+		Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	agent := &store.Agent{
+		ID:           "agent_env_test",
+		Slug:         "env-test-agent",
+		Name:         "Env Test Agent",
+		GroveID:      grove.ID,
+		Status:       store.AgentStatusRunning,
+		StateVersion: 1,
+		Created:      time.Now(),
+		Updated:      time.Now(),
+	}
+	if err := s.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	agentToken, err := srv.agentTokenService.GenerateAgentToken(agent.ID, grove.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to generate agent token: %v", err)
+	}
+
+	// Agent should be able to read own grove env vars
+	rec := doRequestWithAgentToken(t, srv, http.MethodGet, "/api/v1/groves/"+grove.ID+"/env", nil, agentToken)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for agent reading own grove, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEnvVar_GroveScope_AgentOtherGroveDenied(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove1 := &store.Grove{
+		ID: "grove_agent_own", Name: "Agent's Grove", Slug: "agents-grove",
+		Created: time.Now(), Updated: time.Now(),
+	}
+	grove2 := &store.Grove{
+		ID: "grove_agent_other", Name: "Other Grove", Slug: "other-grove",
+		Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove1); err != nil {
+		t.Fatalf("failed to create grove1: %v", err)
+	}
+	if err := s.CreateGrove(ctx, grove2); err != nil {
+		t.Fatalf("failed to create grove2: %v", err)
+	}
+
+	agent := &store.Agent{
+		ID: "agent_other_grove", Slug: "other-grove-agent", Name: "Other Grove Agent",
+		GroveID: grove1.ID, Status: store.AgentStatusRunning, StateVersion: 1,
+		Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	agentToken, err := srv.agentTokenService.GenerateAgentToken(agent.ID, grove1.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to generate agent token: %v", err)
+	}
+
+	// Agent should NOT be able to read other grove env vars
+	rec := doRequestWithAgentToken(t, srv, http.MethodGet, "/api/v1/groves/"+grove2.ID+"/env", nil, agentToken)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for agent reading other grove, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEnvVar_GroveScope_AgentWriteDenied(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID: "grove_agent_nowrite", Name: "Agent No Write Grove", Slug: "agent-nowrite-grove",
+		Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	agent := &store.Agent{
+		ID: "agent_nowrite", Slug: "nowrite-agent", Name: "No Write Agent",
+		GroveID: grove.ID, Status: store.AgentStatusRunning, StateVersion: 1,
+		Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	agentToken, err := srv.agentTokenService.GenerateAgentToken(agent.ID, grove.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to generate agent token: %v", err)
+	}
+
+	// Agent should NOT be able to write grove env vars
+	body := SetEnvVarRequest{Value: "agent-val"}
+	rec := doRequestWithAgentToken(t, srv, http.MethodPut, "/api/v1/groves/"+grove.ID+"/env/AGENT_VAR", body, agentToken)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for agent write, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ============================================================================
+// Broker-Scoped Env Var Authorization Tests
+// ============================================================================
+
+func TestEnvVar_BrokerScope_AdminAccess(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	broker := &store.RuntimeBroker{
+		ID: "broker_env_admin", Name: "Env Admin Broker", Slug: "env-admin-broker",
+		Status: store.BrokerStatusOnline, Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
+		t.Fatalf("failed to create broker: %v", err)
+	}
+
+	// Admin should be able to access broker env vars
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/runtime-brokers/"+broker.ID+"/env", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for admin, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ============================================================================
+// Secrets Authorization Tests
+// ============================================================================
+
+func TestSecret_UserScope_AdminAccess(t *testing.T) {
+	srv, s := testServer(t)
+	srv.SetSecretBackend(secret.NewLocalBackend(s))
+
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/secrets?scope=user", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for admin user scope secrets, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ListSecretsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.ScopeID != "dev-user" {
+		t.Errorf("expected scopeId 'dev-user', got %q", resp.ScopeID)
+	}
+}
+
+func TestSecret_UserScope_MemberAccess(t *testing.T) {
+	srv, s := testServer(t)
+	srv.SetSecretBackend(secret.NewLocalBackend(s))
+	ctx := context.Background()
+
+	member := &store.User{
+		ID: "member-sec-1", Email: "member-sec@example.com", DisplayName: "Test Member",
+		Role: store.UserRoleMember, Status: "active", Created: time.Now(),
+	}
+	if err := s.CreateUser(ctx, member); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	rec := doRequestAsUser(t, srv, member, http.MethodGet, "/api/v1/secrets?scope=user", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for member user scope secrets, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp ListSecretsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.ScopeID != "member-sec-1" {
+		t.Errorf("expected scopeId 'member-sec-1', got %q", resp.ScopeID)
+	}
+}
+
+func TestSecret_UserScope_Unauthenticated(t *testing.T) {
+	srv, s := testServer(t)
+	srv.SetSecretBackend(secret.NewLocalBackend(s))
+
+	rec := doRequestNoAuth(t, srv, http.MethodGet, "/api/v1/secrets?scope=user", nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthenticated, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSecret_UserScope_WriteAuthWorks(t *testing.T) {
+	srv, s := testServer(t)
+	srv.SetSecretBackend(secret.NewLocalBackend(s))
+
+	// Verify that an authenticated user passes auth checks for secret writes.
+	// The LocalBackend doesn't support Set, so expect 501 (not 401/403).
+	body := SetSecretRequest{
+		Value:       "super-secret",
+		Description: "A test secret",
+	}
+	rec := doRequest(t, srv, http.MethodPut, "/api/v1/secrets/MY_SECRET?scope=user", body)
+	// LocalBackend.Set returns ErrNoSecretBackend → 501
+	if rec.Code != http.StatusNotImplemented {
+		t.Errorf("expected 501 (backend not configured for writes), got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Verify unauthenticated is rejected before reaching the backend
+	rec2 := doRequestNoAuth(t, srv, http.MethodPut, "/api/v1/secrets/MY_SECRET?scope=user", body)
+	if rec2.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthenticated write, got %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+// ============================================================================
+// Grove-Scoped Secrets Authorization Tests
+// ============================================================================
+
+func TestSecret_GroveScope_OwnerAccess(t *testing.T) {
+	srv, s := testServer(t)
+	srv.SetSecretBackend(secret.NewLocalBackend(s))
+	ctx := context.Background()
+
+	owner := &store.User{
+		ID: "grove-sec-owner", Email: "secowner@example.com", DisplayName: "Owner",
+		Role: store.UserRoleMember, Status: "active", Created: time.Now(),
+	}
+	if err := s.CreateUser(ctx, owner); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	grove := &store.Grove{
+		ID: "grove_sec_owner", Name: "Secret Owner Grove", Slug: "secret-owner-grove",
+		OwnerID: "grove-sec-owner", Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	rec := doRequestAsUser(t, srv, owner, http.MethodGet, "/api/v1/groves/"+grove.ID+"/secrets", nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for grove owner, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSecret_GroveScope_NonOwnerDenied(t *testing.T) {
+	srv, s := testServer(t)
+	srv.SetSecretBackend(secret.NewLocalBackend(s))
+	ctx := context.Background()
+
+	nonOwner := &store.User{
+		ID: "non-sec-owner", Email: "nonsecowner@example.com", DisplayName: "Non-Owner",
+		Role: store.UserRoleMember, Status: "active", Created: time.Now(),
+	}
+	if err := s.CreateUser(ctx, nonOwner); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	grove := &store.Grove{
+		ID: "grove_sec_notown", Name: "Not Owned Secret Grove", Slug: "not-owned-secret-grove",
+		OwnerID: "someone-else", Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	rec := doRequestAsUser(t, srv, nonOwner, http.MethodGet, "/api/v1/groves/"+grove.ID+"/secrets", nil)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for non-owner, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSecret_GroveScope_AgentReadOwnGrove(t *testing.T) {
+	srv, s := testServer(t)
+	srv.SetSecretBackend(secret.NewLocalBackend(s))
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID: "grove_agent_sec", Name: "Agent Secret Grove", Slug: "agent-secret-grove",
+		Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	agent := &store.Agent{
+		ID: "agent_sec_test", Slug: "sec-test-agent", Name: "Secret Test Agent",
+		GroveID: grove.ID, Status: store.AgentStatusRunning, StateVersion: 1,
+		Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	agentToken, err := srv.agentTokenService.GenerateAgentToken(agent.ID, grove.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to generate agent token: %v", err)
+	}
+
+	rec := doRequestWithAgentToken(t, srv, http.MethodGet, "/api/v1/groves/"+grove.ID+"/secrets", nil, agentToken)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for agent reading own grove secrets, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSecret_GroveScope_AgentWriteDenied(t *testing.T) {
+	srv, s := testServer(t)
+	srv.SetSecretBackend(secret.NewLocalBackend(s))
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID: "grove_agent_sec_nowrite", Name: "Agent Secret No Write", Slug: "agent-sec-nowrite-grove",
+		Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	agent := &store.Agent{
+		ID: "agent_sec_nowrite", Slug: "sec-nowrite-agent", Name: "Secret No Write Agent",
+		GroveID: grove.ID, Status: store.AgentStatusRunning, StateVersion: 1,
+		Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateAgent(ctx, agent); err != nil {
+		t.Fatalf("failed to create agent: %v", err)
+	}
+
+	agentToken, err := srv.agentTokenService.GenerateAgentToken(agent.ID, grove.ID, nil)
+	if err != nil {
+		t.Fatalf("failed to generate agent token: %v", err)
+	}
+
+	body := SetSecretRequest{Value: "agent-secret"}
+	rec := doRequestWithAgentToken(t, srv, http.MethodPut, "/api/v1/groves/"+grove.ID+"/secrets/AGENT_SECRET", body, agentToken)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for agent secret write, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ============================================================================
+// Hub-Level Env Var with Grove/Broker Scope via Query Params
+// ============================================================================
+
+func TestEnvVar_HubEndpoint_GroveScope_Authorized(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	grove := &store.Grove{
+		ID: "grove_hub_env", Name: "Hub Env Grove", Slug: "hub-env-grove",
+		Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	// Admin should be able to list via hub endpoint with grove scope
+	rec := doRequest(t, srv, http.MethodGet, "/api/v1/env?scope=grove&scopeId="+grove.ID, nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200 for admin grove scope, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEnvVar_HubEndpoint_GroveScope_NonOwnerDenied(t *testing.T) {
+	srv, s := testServer(t)
+	ctx := context.Background()
+
+	member := &store.User{
+		ID: "hub-env-member", Email: "hubenvmember@example.com", DisplayName: "Member",
+		Role: store.UserRoleMember, Status: "active", Created: time.Now(),
+	}
+	if err := s.CreateUser(ctx, member); err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+
+	grove := &store.Grove{
+		ID: "grove_hub_env_deny", Name: "Hub Env Deny Grove", Slug: "hub-env-deny-grove",
+		OwnerID: "someone-else", Created: time.Now(), Updated: time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	rec := doRequestAsUser(t, srv, member, http.MethodGet, "/api/v1/env?scope=grove&scopeId="+grove.ID, nil)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for non-owner via hub endpoint, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
