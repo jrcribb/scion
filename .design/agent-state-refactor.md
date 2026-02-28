@@ -511,12 +511,12 @@ This replaces the previously discussed but unimplemented "stale/stalled detectio
 
 ## Implementation Plan
 
-### Phase 1: Define Canonical Types
+### Phase 1: Define Canonical Types ✅
 
-1. Create `pkg/agent/state/state.go` with the canonical `Phase`, `Activity`, `Detail`, and `AgentState` types
-2. Add `DisplayStatus()` for backward-compatible flat status
-3. Add validation functions (`Phase.IsValid()`, `Activity.IsValid()`, `Activity.IsSticky()`)
-4. Add tests for the state model
+1. ~~Create `pkg/agent/state/state.go` with the canonical `Phase`, `Activity`, `Detail`, and `AgentState` types~~
+2. ~~Add `DisplayStatus()` for backward-compatible flat status~~
+3. ~~Add validation functions (`Phase.IsValid()`, `Activity.IsValid()`, `Activity.IsSticky()`)~~
+4. ~~Add tests for the state model~~
 
 ### Phase 2: Refactor Sciontool (Container-Side)
 
