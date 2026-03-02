@@ -141,7 +141,7 @@ func createAgentViaHub(hubCtx *HubContext, agentName string, task string) error 
 		Name:            agentName,
 		GroveID:         groveID,
 		Template:        resolvedTemplate,
-		HarnessConfig:         harnessConfigFlag,
+		HarnessConfig:   harnessConfigFlag,
 		RuntimeBrokerID: runtimeBrokerID,
 		Task:            task,
 		Branch:          branch,
@@ -237,7 +237,7 @@ func init() {
 	createCmd.Flags().StringVarP(&workspace, "workspace", "w", "", "Host path to mount as /workspace")
 	createCmd.Flags().StringVar(&runtimeBrokerID, "broker", "", "Preferred runtime broker ID or name")
 	createCmd.Flags().StringVar(&harnessConfigFlag, "harness-config", "", "Named harness configuration to use")
-	createCmd.Flags().StringVar(&harnessConfigFlag, "harness", "", "Named harness configuration to use (alias for --harness-config)")
+	createCmd.Flags().StringVar(&harnessConfigFlag, "harness", "h", "Named harness configuration to use (alias for --harness-config)")
 
 	// Template resolution flags for Hub mode (Section 9.4)
 	createCmd.Flags().BoolVar(&uploadTemplate, "upload-template", false, "Automatically upload local template to Hub if not found")
