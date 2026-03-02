@@ -1336,6 +1336,10 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 		conditions = append(conditions, "LOWER(name) = LOWER(?)")
 		args = append(args, filter.Name)
 	}
+	if filter.Slug != "" {
+		conditions = append(conditions, "LOWER(slug) = LOWER(?)")
+		args = append(args, filter.Slug)
+	}
 
 	whereClause := ""
 	if len(conditions) > 0 {

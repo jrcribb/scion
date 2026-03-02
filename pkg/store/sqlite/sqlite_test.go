@@ -669,6 +669,44 @@ func TestGroveLookupCaseInsensitive(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
+func TestGroveListBySlug(t *testing.T) {
+	s := setupTestStore(t)
+	ctx := context.Background()
+
+	// Create two groves with distinct slugs
+	grove1 := &store.Grove{
+		ID:         api.NewUUID(),
+		Name:       "Alpha Project",
+		Slug:       "alpha-project",
+		Visibility: store.VisibilityPrivate,
+	}
+	grove2 := &store.Grove{
+		ID:         api.NewUUID(),
+		Name:       "Beta Project",
+		Slug:       "beta-project",
+		Visibility: store.VisibilityPrivate,
+	}
+	require.NoError(t, s.CreateGrove(ctx, grove1))
+	require.NoError(t, s.CreateGrove(ctx, grove2))
+
+	// Filter by slug — exact match
+	result, err := s.ListGroves(ctx, store.GroveFilter{Slug: "alpha-project"}, store.ListOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.TotalCount)
+	assert.Equal(t, grove1.ID, result.Items[0].ID)
+
+	// Filter by slug — case-insensitive
+	result, err = s.ListGroves(ctx, store.GroveFilter{Slug: "ALPHA-PROJECT"}, store.ListOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.TotalCount)
+	assert.Equal(t, grove1.ID, result.Items[0].ID)
+
+	// Filter by slug — no match
+	result, err = s.ListGroves(ctx, store.GroveFilter{Slug: "nonexistent"}, store.ListOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.TotalCount)
+}
+
 func TestRuntimeBrokerLookupByName(t *testing.T) {
 	s := setupTestStore(t)
 	ctx := context.Background()

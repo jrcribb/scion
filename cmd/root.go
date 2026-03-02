@@ -167,7 +167,7 @@ func Execute() {
 
 func init() {
 	rootCmd.Long = util.GetBanner() + "\n" + rootCmd.Long
-	rootCmd.PersistentFlags().StringVarP(&grovePath, "grove", "g", "", "Path to a .scion grove directory")
+	rootCmd.PersistentFlags().StringVarP(&grovePath, "grove", "g", "", "Grove identifier: path, slug (with Hub), or git URL (with Hub)")
 	rootCmd.PersistentFlags().BoolVar(&globalMode, "global", false, "Use the global grove (equivalent to --grove global)")
 	rootCmd.PersistentFlags().StringVarP(&profile, "profile", "p", "", "Configuration profile to use")
 	rootCmd.PersistentFlags().StringVar(&outputFormat, "format", "", "Output format (e.g., json)")

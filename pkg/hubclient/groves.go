@@ -78,6 +78,7 @@ type ListGrovesOptions struct {
 	GitRemote  string // Filter by git remote (exact or prefix)
 	BrokerID string // Filter by contributing broker
 	Name       string // Filter by exact name (case-insensitive)
+	Slug       string // Filter by exact slug (case-insensitive)
 	Labels     map[string]string
 	Page       apiclient.PageOptions
 }
@@ -188,6 +189,9 @@ func (s *groveService) List(ctx context.Context, opts *ListGrovesOptions) (*List
 		}
 		if opts.Name != "" {
 			query.Set("name", opts.Name)
+		}
+		if opts.Slug != "" {
+			query.Set("slug", opts.Slug)
 		}
 		for k, v := range opts.Labels {
 			query.Add("label", fmt.Sprintf("%s=%s", k, v))

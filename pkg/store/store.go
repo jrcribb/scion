@@ -193,6 +193,7 @@ type GroveFilter struct {
 	GitRemotePrefix string
 	BrokerID string // Filter by contributing broker
 	Name            string // Filter by exact name (case-insensitive)
+	Slug            string // Filter by exact slug (case-insensitive)
 }
 
 // RuntimeBrokerStore defines runtime broker persistence operations.

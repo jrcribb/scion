@@ -143,8 +143,17 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 
 	// Check if --no-hub flag is set
 	if opts.NoHub {
+		if grovePath != "" && IsHubGroveRef(grovePath) {
+			return nil, fmt.Errorf("cannot use --no-hub with a hub grove reference (%s)\n\n"+
+				"Hub grove references (slugs, names, git URLs) require hub connectivity.", grovePath)
+		}
 		debugf("NoHub flag set, returning nil")
 		return nil, nil
+	}
+
+	// Check if grovePath is a hub grove reference (slug, name, UUID, or git URL)
+	if grovePath != "" && IsHubGroveRef(grovePath) {
+		return resolveHubGroveRef(grovePath, opts)
 	}
 
 	// Resolve grove path

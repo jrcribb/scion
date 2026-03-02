@@ -1625,6 +1625,7 @@ func (s *Server) listGroves(w http.ResponseWriter, r *http.Request) {
 		GitRemotePrefix: util.NormalizeGitRemote(query.Get("gitRemote")),
 		BrokerID:          query.Get("brokerId"),
 		Name:            query.Get("name"),
+		Slug:            query.Get("slug"),
 	}
 
 	limit := 50
