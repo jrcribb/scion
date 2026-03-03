@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ptone/scion-agent/pkg/agent/state"
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/runtime"
 )
@@ -273,5 +274,120 @@ func TestListNonRunningAgentIncludesHarnessConfig(t *testing.T) {
 	}
 	if found.LastSeen.IsZero() {
 		t.Error("LastSeen should be populated for non-running agents")
+	}
+}
+
+func TestListReconcilesPhaseWithContainerStatus(t *testing.T) {
+	tests := []struct {
+		name            string
+		containerStatus string
+		infoPhase       string
+		infoActivity    string
+		wantPhase       string
+		wantActivity    string
+	}{
+		{
+			name:            "running container overrides stopped phase",
+			containerStatus: "Up 2 hours",
+			infoPhase:       string(state.PhaseStopped),
+			wantPhase:       string(state.PhaseRunning),
+		},
+		{
+			name:            "running status overrides stopped phase",
+			containerStatus: "running",
+			infoPhase:       string(state.PhaseStopped),
+			wantPhase:       string(state.PhaseRunning),
+		},
+		{
+			name:            "exited container overrides running phase",
+			containerStatus: "Exited (0) 5 minutes ago",
+			infoPhase:       string(state.PhaseRunning),
+			infoActivity:    string(state.ActivityThinking),
+			wantPhase:       string(state.PhaseStopped),
+			wantActivity:    "",
+		},
+		{
+			name:            "stopped container overrides running phase",
+			containerStatus: "stopped",
+			infoPhase:       string(state.PhaseRunning),
+			infoActivity:    string(state.ActivityExecuting),
+			wantPhase:       string(state.PhaseStopped),
+			wantActivity:    "",
+		},
+		{
+			name:            "consistent running state unchanged",
+			containerStatus: "Up 10 minutes",
+			infoPhase:       string(state.PhaseRunning),
+			infoActivity:    string(state.ActivityThinking),
+			wantPhase:       string(state.PhaseRunning),
+			wantActivity:    string(state.ActivityThinking),
+		},
+		{
+			name:            "consistent stopped state unchanged",
+			containerStatus: "Exited (0) 1 hour ago",
+			infoPhase:       string(state.PhaseStopped),
+			wantPhase:       string(state.PhaseStopped),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			grovePath := filepath.Join(tmpDir, ".scion")
+			agentName := "reconcile-agent"
+			agentHome := filepath.Join(grovePath, "agents", agentName, "home")
+			if err := os.MkdirAll(agentHome, 0755); err != nil {
+				t.Fatal(err)
+			}
+
+			info := api.AgentInfo{
+				Name:     agentName,
+				Phase:    tc.infoPhase,
+				Activity: tc.infoActivity,
+			}
+			infoData, _ := json.MarshalIndent(info, "", "  ")
+			if err := os.WriteFile(filepath.Join(agentHome, "agent-info.json"), infoData, 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(grovePath, "agents", agentName, "scion-agent.json"), []byte("{}"), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			mock := &runtime.MockRuntime{
+				ListFunc: func(_ context.Context, _ map[string]string) ([]api.AgentInfo, error) {
+					return []api.AgentInfo{
+						{
+							Name:            agentName,
+							GrovePath:       grovePath,
+							ContainerStatus: tc.containerStatus,
+						},
+					}, nil
+				},
+			}
+
+			mgr := NewManager(mock)
+			agents, err := mgr.List(context.Background(), nil)
+			if err != nil {
+				t.Fatalf("List() error: %v", err)
+			}
+
+			var found *api.AgentInfo
+			for i := range agents {
+				if agents[i].Name == agentName {
+					found = &agents[i]
+					break
+				}
+			}
+			if found == nil {
+				t.Fatal("agent not found in list results")
+			}
+
+			if found.Phase != tc.wantPhase {
+				t.Errorf("Phase = %q, want %q", found.Phase, tc.wantPhase)
+			}
+			if found.Activity != tc.wantActivity {
+				t.Errorf("Activity = %q, want %q", found.Activity, tc.wantActivity)
+			}
+		})
 	}
 }

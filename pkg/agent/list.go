@@ -20,7 +20,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/ptone/scion-agent/pkg/agent/state"
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
 )
@@ -116,6 +118,20 @@ func (m *AgentManager) List(ctx context.Context, filter map[string]string) ([]ap
 					}
 				}
 			}
+		}
+
+		// Reconcile phase with actual container status.
+		// Container runtime status is authoritative for running/stopped.
+		containerStatusLower := strings.ToLower(agents[i].ContainerStatus)
+		isContainerRunning := strings.HasPrefix(containerStatusLower, "up") || containerStatusLower == "running"
+		isContainerStopped := strings.HasPrefix(containerStatusLower, "exited") || containerStatusLower == "stopped"
+
+		if isContainerRunning && agents[i].Phase == string(state.PhaseStopped) {
+			agents[i].Phase = string(state.PhaseRunning)
+		}
+		if isContainerStopped && agents[i].Phase == string(state.PhaseRunning) {
+			agents[i].Phase = string(state.PhaseStopped)
+			agents[i].Activity = ""
 		}
 	}
 
