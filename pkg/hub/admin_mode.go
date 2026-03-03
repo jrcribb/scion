@@ -20,6 +20,9 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/ptone/scion-agent/pkg/store"
 )
 
 const defaultMaintenanceMessage = "System offline for maintenance"
@@ -216,6 +219,46 @@ func (s *Server) handleAdminMaintenance(w http.ResponseWriter, r *http.Request) 
 	default:
 		MethodNotAllowed(w)
 	}
+}
+
+// handleAdminScheduler handles GET /api/v1/admin/scheduler.
+// Returns the scheduler's current status including recurring handlers,
+// event handlers, and active one-shot timer count. Requires admin role.
+func (s *Server) handleAdminScheduler(w http.ResponseWriter, r *http.Request) {
+	user := GetUserIdentityFromContext(r.Context())
+	if user == nil || user.Role() != "admin" {
+		Forbidden(w)
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		MethodNotAllowed(w)
+		return
+	}
+
+	if s.scheduler == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status": "not_initialized",
+		})
+		return
+	}
+
+	status := s.scheduler.Status()
+
+	// Fetch recent scheduled events across all groves.
+	var events []store.ScheduledEvent
+	if s.store != nil {
+		result, err := s.store.ListScheduledEvents(r.Context(), store.ScheduledEventFilter{}, store.ListOptions{Limit: 50})
+		if err == nil && result != nil {
+			events = result.Items
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"scheduler":       status,
+		"scheduledEvents": events,
+		"serverTime":      time.Now().UTC(),
+	})
 }
 
 // maintenancePageHTML returns a self-contained HTML maintenance page.

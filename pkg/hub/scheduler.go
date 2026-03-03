@@ -336,6 +336,49 @@ func (s *Scheduler) ScheduleEvent(ctx context.Context, evt store.ScheduledEvent)
 	return nil
 }
 
+// SchedulerStatus holds a point-in-time snapshot of the scheduler's state.
+type SchedulerStatus struct {
+	TickCount     uint64                  `json:"tickCount"`
+	TickInterval  string                  `json:"tickInterval"`
+	Recurring     []RecurringHandlerInfo  `json:"recurringHandlers"`
+	EventHandlers []string                `json:"eventHandlers"`
+	ActiveTimers  int                     `json:"activeTimers"`
+}
+
+// RecurringHandlerInfo is the public view of a registered recurring handler.
+type RecurringHandlerInfo struct {
+	Name     string `json:"name"`
+	Interval int    `json:"intervalMinutes"`
+}
+
+// Status returns a snapshot of the scheduler's current state.
+func (s *Scheduler) Status() SchedulerStatus {
+	recurring := make([]RecurringHandlerInfo, len(s.recurring))
+	for i, h := range s.recurring {
+		recurring[i] = RecurringHandlerInfo{
+			Name:     h.Name,
+			Interval: h.Interval,
+		}
+	}
+
+	eventHandlers := make([]string, 0, len(s.eventHandlers))
+	for t := range s.eventHandlers {
+		eventHandlers = append(eventHandlers, t)
+	}
+
+	s.mu.Lock()
+	activeTimers := len(s.timers)
+	s.mu.Unlock()
+
+	return SchedulerStatus{
+		TickCount:     s.tickCount,
+		TickInterval:  s.tickInterval.String(),
+		Recurring:     recurring,
+		EventHandlers: eventHandlers,
+		ActiveTimers:  activeTimers,
+	}
+}
+
 // CancelEvent cancels a pending scheduled event. The in-memory timer is
 // stopped and the database record is marked as cancelled.
 func (s *Scheduler) CancelEvent(ctx context.Context, id string) error {

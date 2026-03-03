@@ -76,6 +76,7 @@ import '../components/pages/grove-create.js';
 import '../components/pages/terminal.js';
 import '../components/pages/brokers.js';
 import '../components/pages/broker-detail.js';
+import '../components/pages/admin-scheduler.js';
 import '../components/pages/admin-users.js';
 import '../components/pages/admin-groups.js';
 import '../components/pages/admin-group-detail.js';
@@ -124,6 +125,7 @@ const ROUTES: { pattern: RegExp; tag: string }[] = [
   { pattern: /^\/agents$/, tag: 'scion-page-agents' },
   { pattern: /^\/brokers$/, tag: 'scion-page-brokers' },
   { pattern: /^\/brokers\/[^/]+$/, tag: 'scion-page-broker-detail' },
+  { pattern: /^\/admin\/scheduler$/, tag: 'scion-page-admin-scheduler' },
   { pattern: /^\/admin\/users$/, tag: 'scion-page-admin-users' },
   { pattern: /^\/admin\/groups$/, tag: 'scion-page-admin-groups' },
   { pattern: /^\/admin\/groups\/[^/]+$/, tag: 'scion-page-admin-group-detail' },
@@ -153,7 +155,7 @@ const PROFILE_ROUTES = new Set(['scion-page-profile-env-vars', 'scion-page-profi
 /**
  * Routes that require admin role. Non-admin users are redirected to dashboard.
  */
-const ADMIN_ROUTES = new Set(['scion-page-settings', 'scion-page-admin-users', 'scion-page-admin-groups', 'scion-page-admin-group-detail']);
+const ADMIN_ROUTES = new Set(['scion-page-settings', 'scion-page-admin-scheduler', 'scion-page-admin-users', 'scion-page-admin-groups', 'scion-page-admin-group-detail']);
 
 /**
  * Initialize the client-side application
@@ -207,6 +209,7 @@ async function init(): Promise<void> {
     customElements.whenDefined('scion-page-terminal'),
     customElements.whenDefined('scion-page-brokers'),
     customElements.whenDefined('scion-page-broker-detail'),
+    customElements.whenDefined('scion-page-admin-scheduler'),
     customElements.whenDefined('scion-page-admin-users'),
     customElements.whenDefined('scion-page-admin-groups'),
     customElements.whenDefined('scion-page-admin-group-detail'),
