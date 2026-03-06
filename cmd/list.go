@@ -199,6 +199,7 @@ func hubAgentToAgentInfo(a hubclient.Agent) api.AgentInfo {
 		Name:              a.Name,
 		Template:          a.Template,
 		HarnessConfig:     a.HarnessConfig,
+		HarnessAuth:       a.HarnessAuth,
 		Grove:             a.Grove,
 		GroveID:           a.GroveID,
 		Labels:            a.Labels,
@@ -225,10 +226,13 @@ func hubAgentToAgentInfo(a hubclient.Agent) api.AgentInfo {
 		StateVersion:      a.StateVersion,
 	}
 
-	// Fall back to AppliedConfig.HarnessConfig if top-level HarnessConfig is empty
-	// (for backward compatibility with older Hubs that don't enrich HarnessConfig)
+	// Fall back to AppliedConfig fields if top-level fields are empty
+	// (for backward compatibility with older Hubs that don't enrich these)
 	if info.HarnessConfig == "" && a.AppliedConfig != nil && a.AppliedConfig.HarnessConfig != "" {
 		info.HarnessConfig = a.AppliedConfig.HarnessConfig
+	}
+	if info.HarnessAuth == "" && a.AppliedConfig != nil && a.AppliedConfig.HarnessAuth != "" {
+		info.HarnessAuth = a.AppliedConfig.HarnessAuth
 	}
 
 	// Convert Kubernetes info if present

@@ -3657,6 +3657,7 @@ type brokerAgentHeartbeat struct {
 	Phase           string `json:"phase,omitempty"`
 	Activity        string `json:"activity,omitempty"`
 	ContainerStatus string `json:"containerStatus,omitempty"`
+	HarnessAuth     string `json:"harnessAuth,omitempty"` // Resolved auth method from container labels
 }
 
 func (s *Server) handleBrokerHeartbeat(w http.ResponseWriter, r *http.Request, id string) {
@@ -3746,6 +3747,20 @@ func (s *Server) handleBrokerHeartbeat(w http.ResponseWriter, r *http.Request, i
 							statusUpdate.Phase = string(state.PhaseProvisioning)
 						}
 					}
+				}
+			}
+
+			// Backfill HarnessAuth from heartbeat if the agent record is missing it.
+			// This covers agents created before auth tracking was added, or
+			// agents where auth was auto-detected rather than explicitly set.
+			if agentHB.HarnessAuth != "" && (agent.AppliedConfig == nil || agent.AppliedConfig.HarnessAuth == "") {
+				if agent.AppliedConfig == nil {
+					agent.AppliedConfig = &store.AgentAppliedConfig{}
+				}
+				agent.AppliedConfig.HarnessAuth = agentHB.HarnessAuth
+				if err := s.store.UpdateAgent(ctx, agent); err != nil {
+					slog.Warn("Failed to backfill HarnessAuth from heartbeat",
+						"agentID", agent.ID, "harnessAuth", agentHB.HarnessAuth, "error", err)
 				}
 			}
 

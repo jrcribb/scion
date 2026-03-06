@@ -219,6 +219,7 @@ func (s *HeartbeatService) gatherGroveAgents() []hubclient.GroveHeartbeat {
 			Phase:           ag.Phase,
 			Activity:        ag.Activity,
 			ContainerStatus: ag.ContainerStatus,
+			HarnessAuth:     ag.HarnessAuth,
 		}
 		groveMap[groveID] = append(groveMap[groveID], agentHB)
 	}

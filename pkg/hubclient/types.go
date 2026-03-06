@@ -24,6 +24,7 @@ type Agent struct {
 	Name            string            `json:"name"`
 	Template        string            `json:"template,omitempty"`
 	HarnessConfig   string            `json:"harnessConfig,omitempty"`
+	HarnessAuth     string            `json:"harnessAuth,omitempty"`
 	GroveID         string            `json:"groveId,omitempty"`
 	Grove           string            `json:"grove,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"`
@@ -57,11 +58,12 @@ type Agent struct {
 
 // AgentConfig represents agent configuration.
 type AgentConfig struct {
-	Image   string            `json:"image,omitempty"`
+	Image         string            `json:"image,omitempty"`
 	HarnessConfig string            `json:"harnessConfig,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Model   string            `json:"model,omitempty"`
-	Task    string            `json:"task,omitempty"`
+	HarnessAuth   string            `json:"harnessAuth,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	Task          string            `json:"task,omitempty"`
 }
 
 // DirectConnect contains direct connection info.

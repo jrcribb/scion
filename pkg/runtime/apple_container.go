@@ -198,6 +198,7 @@ func (r *AppleContainerRuntime) List(ctx context.Context, labelFilter map[string
 			Name:            c.Configuration.Labels["scion.name"],
 			Template:        c.Configuration.Labels["scion.template"],
 			HarnessConfig:   c.Configuration.Labels["scion.harness_config"],
+			HarnessAuth:     c.Configuration.Labels["scion.harness_auth"],
 			Grove:           c.Configuration.Labels["scion.grove"],
 			GrovePath:       c.Configuration.Labels["scion.grove_path"],
 			Labels:          c.Configuration.Labels,
