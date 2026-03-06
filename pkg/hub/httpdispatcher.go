@@ -770,6 +770,9 @@ func (d *HTTPAgentDispatcher) applyBrokerResponse(agent *store.Agent, resp *Remo
 			if resp.Agent.HarnessAuth != "" {
 				agent.AppliedConfig.HarnessAuth = resp.Agent.HarnessAuth
 			}
+			if resp.Agent.Image != "" {
+				agent.AppliedConfig.Image = resp.Agent.Image
+			}
 		}
 		if resp.Agent.Runtime != "" {
 			agent.Runtime = resp.Agent.Runtime
@@ -822,6 +825,23 @@ func (d *HTTPAgentDispatcher) DispatchAgentProvision(ctx context.Context, agent 
 		return err
 	}
 	req.ProvisionOnly = true
+
+	// Merge resolved storage env vars back into AppliedConfig so they are
+	// visible in the advanced config form. Exclude internal SCION_* vars
+	// and dev tokens which are injected at start time.
+	if agent.AppliedConfig != nil && len(req.ResolvedEnv) > 0 {
+		if agent.AppliedConfig.Env == nil {
+			agent.AppliedConfig.Env = make(map[string]string)
+		}
+		for k, v := range req.ResolvedEnv {
+			if strings.HasPrefix(k, "SCION_") {
+				continue
+			}
+			if _, exists := agent.AppliedConfig.Env[k]; !exists {
+				agent.AppliedConfig.Env[k] = v
+			}
+		}
+	}
 
 	resp, err := d.client.CreateAgent(ctx, agent.RuntimeBrokerID, endpoint, req)
 	if err != nil {

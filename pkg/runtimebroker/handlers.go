@@ -690,6 +690,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		if cfg != nil {
 			agentResp.HarnessConfig = cfg.HarnessConfig
+			agentResp.Image = cfg.Image
 		}
 		if s.runtime != nil {
 			agentResp.RuntimeType = s.runtime.Name()

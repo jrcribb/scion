@@ -6131,6 +6131,33 @@ func (s *Server) populateAgentConfig(agent *store.Agent, grove *store.Grove, res
 		if resolvedTemplate.Config != nil && resolvedTemplate.Config.HubAccess != nil {
 			agent.AppliedConfig.HubAccessScopes = resolvedTemplate.Config.HubAccess.Scopes
 		}
+
+		// Merge template-level config values as defaults into AppliedConfig.
+		// These act as pre-populated defaults for the advanced config form and
+		// ensure the hub agent record reflects the effective configuration.
+		// Explicit request values (already set) take precedence.
+		if resolvedTemplate.Image != "" && agent.AppliedConfig.Image == "" {
+			agent.AppliedConfig.Image = resolvedTemplate.Image
+		}
+		if resolvedTemplate.Config != nil {
+			if resolvedTemplate.Config.Image != "" && agent.AppliedConfig.Image == "" {
+				agent.AppliedConfig.Image = resolvedTemplate.Config.Image
+			}
+			if resolvedTemplate.Config.Model != "" && agent.AppliedConfig.Model == "" {
+				agent.AppliedConfig.Model = resolvedTemplate.Config.Model
+			}
+			// Merge template env vars as defaults (don't overwrite explicit config env)
+			if len(resolvedTemplate.Config.Env) > 0 {
+				if agent.AppliedConfig.Env == nil {
+					agent.AppliedConfig.Env = make(map[string]string)
+				}
+				for k, v := range resolvedTemplate.Config.Env {
+					if _, exists := agent.AppliedConfig.Env[k]; !exists {
+						agent.AppliedConfig.Env[k] = v
+					}
+				}
+			}
+		}
 	}
 }
 
