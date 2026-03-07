@@ -614,6 +614,13 @@ export class ScionPageGroveDetail extends LitElement {
     }
   }
 
+  private renderGroveIcon() {
+    if (!this.grove) return nothing;
+    const type = this.grove.groveType || (this.grove.gitRemote ? 'git' : 'hub-native');
+    const icon = { 'git': 'diagram-3', 'linked': 'link-45deg', 'hub-native': 'folder-fill' }[type] ?? 'folder-fill';
+    return html`<sl-icon name=${icon}></sl-icon>`;
+  }
+
   private getGroveStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
     switch (status) {
       case 'active':
@@ -878,9 +885,7 @@ export class ScionPageGroveDetail extends LitElement {
       <div class="header">
         <div class="header-info">
           <div class="header-title">
-            ${this.grove.gitRemote
-              ? html`<sl-icon name="diagram-3"></sl-icon>`
-              : html`<sl-icon name="folder-fill"></sl-icon>`}
+            ${this.renderGroveIcon()}
             <h1>${this.grove.name}</h1>
             <scion-status-badge
               status=${this.getGroveStatusVariant(this.grove.status)}
@@ -888,7 +893,7 @@ export class ScionPageGroveDetail extends LitElement {
               size="small"
             ></scion-status-badge>
           </div>
-          <div class="header-path">${this.grove.gitRemote || 'Hub Workspace'}</div>
+          <div class="header-path">${this.grove.gitRemote || (this.grove.groveType === 'linked' ? 'Broker Linked' : 'Hub Workspace')}</div>
         </div>
         <div class="header-actions">
           ${can(this.agentScopeCapabilities, 'create')

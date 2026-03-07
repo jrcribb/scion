@@ -117,12 +117,18 @@ export type GroveStatus = 'active' | 'inactive' | 'error';
 /**
  * Grove information from the Hub API
  */
+/**
+ * Grove type enumeration
+ */
+export type GroveType = 'git' | 'linked' | 'hub-native';
+
 export interface Grove {
   id: string;
   name: string;
   slug?: string;
   path: string;
   gitRemote?: string;
+  groveType?: GroveType;
   status: GroveStatus;
   visibility?: string;
   labels?: Record<string, string>;

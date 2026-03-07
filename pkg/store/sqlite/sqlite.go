@@ -1445,8 +1445,27 @@ func (s *SQLiteStore) GetGrove(ctx context.Context, id string) (*store.Grove, er
 	// Populate computed fields
 	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agents WHERE grove_id = ?", id).Scan(&grove.AgentCount)
 	s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND status = 'online'", id).Scan(&grove.ActiveBrokerCount)
+	s.populateGroveType(ctx, grove)
 
 	return grove, nil
+}
+
+// populateGroveType sets the computed GroveType field based on git remote and provider paths.
+func (s *SQLiteStore) populateGroveType(ctx context.Context, grove *store.Grove) {
+	if grove.GitRemote != "" {
+		grove.GroveType = store.GroveTypeGit
+		return
+	}
+	// Check if any provider has a local_path not under ~/.scion/groves/ (i.e. broker-linked)
+	var linkedCount int
+	s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND local_path != '' AND local_path NOT LIKE '%/.scion/groves/%'",
+		grove.ID).Scan(&linkedCount)
+	if linkedCount > 0 {
+		grove.GroveType = store.GroveTypeLinked
+		return
+	}
+	grove.GroveType = store.GroveTypeHubNative
 }
 
 func (s *SQLiteStore) GetGroveBySlug(ctx context.Context, slug string) (*store.Grove, error) {
@@ -1623,6 +1642,7 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 		// Populate computed fields - these now have a connection available
 		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM agents WHERE grove_id = ?", grove.ID).Scan(&grove.AgentCount)
 		s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM grove_contributors WHERE grove_id = ? AND status = 'online'", grove.ID).Scan(&grove.ActiveBrokerCount)
+		s.populateGroveType(ctx, &grove)
 
 		groves = append(groves, grove)
 	}

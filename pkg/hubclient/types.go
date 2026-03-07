@@ -99,6 +99,7 @@ type Grove struct {
 	Providers            []GroveProvider    `json:"providers,omitempty"`
 	AgentCount           int                `json:"agentCount,omitempty"`
 	ActiveBrokerCount      int                `json:"activeBrokerCount,omitempty"`
+	GroveType            string             `json:"groveType,omitempty"`
 }
 
 // GroveProvider represents a broker providing runtime services to a grove.

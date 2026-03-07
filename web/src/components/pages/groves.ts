@@ -291,18 +291,33 @@ export class ScionPageGroves extends LitElement {
     `;
   }
 
+  private groveTypeConfig(grove: Grove) {
+    const type = grove.groveType || (grove.gitRemote ? 'git' : 'hub-native');
+    return {
+      'git': { icon: 'diagram-3', label: 'Git-backed grove' },
+      'linked': { icon: 'link-45deg', label: 'Broker Linked' },
+      'hub-native': { icon: 'folder-fill', label: 'Hub workspace' },
+    }[type]!;
+  }
+
+  private renderGroveIcon(grove: Grove, withTooltip = false) {
+    const config = this.groveTypeConfig(grove);
+    if (withTooltip) {
+      return html`<sl-tooltip content=${config.label}><sl-icon name=${config.icon}></sl-icon></sl-tooltip>`;
+    }
+    return html`<sl-icon name=${config.icon}></sl-icon>`;
+  }
+
   private renderGroveCard(grove: Grove) {
     return html`
       <a href="/groves/${grove.id}" class="resource-card">
         <div class="grove-header">
           <div>
             <h3 class="resource-name">
-              ${grove.gitRemote
-                ? html`<sl-tooltip content="Git-backed grove"><sl-icon name="diagram-3"></sl-icon></sl-tooltip>`
-                : html`<sl-tooltip content="Hub workspace"><sl-icon name="folder-fill"></sl-icon></sl-tooltip>`}
+              ${this.renderGroveIcon(grove, true)}
               ${grove.name}
             </h3>
-            <div class="grove-path">${grove.gitRemote || grove.path || 'Hub workspace'}</div>
+            <div class="grove-path">${grove.gitRemote || grove.path || this.groveTypeConfig(grove).label}</div>
           </div>
         </div>
         <div class="grove-stats">
@@ -349,13 +364,11 @@ export class ScionPageGroves extends LitElement {
       }}>
         <td>
           <span class="name-cell">
-            ${grove.gitRemote
-              ? html`<sl-icon name="diagram-3"></sl-icon>`
-              : html`<sl-icon name="folder-fill"></sl-icon>`}
+            ${this.renderGroveIcon(grove)}
             ${grove.name}
           </span>
         </td>
-        <td class="mono-cell">${grove.gitRemote || grove.path || 'Hub workspace'}</td>
+        <td class="mono-cell">${grove.gitRemote || grove.path || this.groveTypeConfig(grove).label}</td>
         <td>${grove.agentCount}</td>
         <td class="hide-mobile">
           <span class="meta-text">${this.formatDate(grove.updatedAt)}</span>

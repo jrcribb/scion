@@ -124,6 +124,13 @@ type AgentAppliedConfig struct {
 }
 
 
+// Grove type constants.
+const (
+	GroveTypeGit      = "git"       // Git-backed grove with a remote URL
+	GroveTypeLinked   = "linked"    // Broker-linked grove (local project linked to hub)
+	GroveTypeHubNative = "hub-native" // Hub-native workspace
+)
+
 // Grove represents a project/agent group in the Hub database.
 type Grove struct {
 	// Identity
@@ -153,8 +160,9 @@ type Grove struct {
 	Visibility string `json:"visibility"` // private, team, public
 
 	// Computed fields (not stored, populated on read)
-	AgentCount      int `json:"agentCount,omitempty"`
-	ActiveBrokerCount int `json:"activeBrokerCount,omitempty"`
+	AgentCount        int    `json:"agentCount,omitempty"`
+	ActiveBrokerCount int    `json:"activeBrokerCount,omitempty"`
+	GroveType         string `json:"groveType,omitempty"` // "git", "linked", or "hub-native"
 }
 
 // RuntimeBroker represents a compute node in the Hub database.
