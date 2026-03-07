@@ -66,6 +66,10 @@ func NewGCPHandler(w io.Writer, opts *slog.HandlerOptions, component string) *GC
 			level := a.Value.Any().(slog.Level)
 			return slog.String(GCPKeySeverity, levelToSeverity[level])
 		case slog.MessageKey:
+			// Suppress empty messages (e.g. HTTP request logs).
+			if a.Value.String() == "" {
+				return slog.Attr{}
+			}
 			return slog.Attr{Key: GCPKeyMessage, Value: a.Value}
 		case slog.TimeKey:
 			return slog.Attr{Key: GCPKeyTimestamp, Value: a.Value}
@@ -84,6 +88,7 @@ func NewGCPHandler(w io.Writer, opts *slog.HandlerOptions, component string) *GC
 	}
 	if hostname != "" {
 		labels["hostname"] = hostname
+		labels["hub"] = hostname
 	}
 
 	return &GCPHandler{

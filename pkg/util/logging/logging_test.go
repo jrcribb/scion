@@ -47,7 +47,36 @@ func TestGCPHandler(t *testing.T) {
 	hostname, _ := os.Hostname()
 	if hostname != "" {
 		assert.Equal(t, hostname, labels["hostname"])
+		assert.Equal(t, hostname, labels["hub"])
 	}
+}
+
+func TestGCPHandler_EmptyMessageSuppressed(t *testing.T) {
+	var buf bytes.Buffer
+	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
+	handler := NewGCPHandler(&buf, opts, "test-component")
+	logger := slog.New(handler)
+
+	// Log with empty message (as HTTP request logs do)
+	logger.LogAttrs(nil, slog.LevelInfo, "",
+		slog.Group("httpRequest",
+			slog.String("requestMethod", "GET"),
+			slog.Int("status", 200),
+		),
+	)
+
+	var data map[string]interface{}
+	err := json.Unmarshal(buf.Bytes(), &data)
+	assert.NoError(t, err)
+
+	// The "message" key should not be present
+	_, hasMessage := data[GCPKeyMessage]
+	assert.False(t, hasMessage, "empty message should be suppressed, got: %v", data[GCPKeyMessage])
+
+	// httpRequest should still be present
+	httpReq, ok := data["httpRequest"].(map[string]interface{})
+	assert.True(t, ok, "expected httpRequest group")
+	assert.Equal(t, "GET", httpReq["requestMethod"])
 }
 
 func TestSubsystemLogger(t *testing.T) {

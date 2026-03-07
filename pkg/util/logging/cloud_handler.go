@@ -18,9 +18,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strconv"
+	"time"
 
 	gcplog "cloud.google.com/go/logging"
 	logpb "cloud.google.com/go/logging/apiv2/loggingpb"
@@ -51,6 +54,7 @@ type CloudHandler struct {
 	client    *gcplog.Client
 	level     slog.Level
 	component string
+	hostname  string
 	attrs     []slog.Attr
 	groups    []string
 }
@@ -78,11 +82,14 @@ func NewCloudHandler(ctx context.Context, config CloudLoggingConfig, level slog.
 
 	logger := client.Logger(logID)
 
+	hostname, _ := os.Hostname()
+
 	handler := &CloudHandler{
 		logger:    logger,
 		client:    client,
 		level:     level,
 		component: config.Component,
+		hostname:  hostname,
 	}
 
 	cleanup := func() {
@@ -141,14 +148,27 @@ func (h *CloudHandler) Handle(_ context.Context, r slog.Record) error {
 	// Map slog level to Cloud Logging severity
 	severity := slogLevelToSeverity(r.Level)
 
+	// Build labels
+	labels := map[string]string{
+		"component": h.component,
+	}
+	if h.hostname != "" {
+		labels["hub"] = h.hostname
+	}
+
 	entry := gcplog.Entry{
 		Severity:       severity,
 		Payload:        payload,
 		SourceLocation: sourceLocation,
-		Labels: map[string]string{
-			"component": h.component,
-		},
-		Timestamp: r.Time,
+		Labels:         labels,
+		Timestamp:      r.Time,
+	}
+
+	// Promote httpRequest to top-level entry field if present.
+	if reqMap, ok := payload["httpRequest"].(map[string]any); ok {
+		entry.HTTPRequest = mapToCloudHTTPRequest(reqMap)
+		delete(payload, "httpRequest")
+		delete(payload, "message")
 	}
 
 	h.logger.Log(entry)
@@ -165,6 +185,7 @@ func (h *CloudHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		client:    h.client,
 		level:     h.level,
 		component: h.component,
+		hostname:  h.hostname,
 		attrs:     newAttrs,
 		groups:    h.groups,
 	}
@@ -180,6 +201,7 @@ func (h *CloudHandler) WithGroup(name string) slog.Handler {
 		client:    h.client,
 		level:     h.level,
 		component: h.component,
+		hostname:  h.hostname,
 		attrs:     h.attrs,
 		groups:    newGroups,
 	}
@@ -195,11 +217,13 @@ func (h *CloudHandler) Client() *gcplog.Client {
 // This avoids opening a second connection for the request log stream.
 func NewCloudHandlerFromClient(client *gcplog.Client, logID, component string, level slog.Level) *CloudHandler {
 	logger := client.Logger(logID)
+	hostname, _ := os.Hostname()
 	return &CloudHandler{
 		logger:    logger,
 		client:    client,
 		level:     level,
 		component: component,
+		hostname:  hostname,
 	}
 }
 
@@ -291,4 +315,76 @@ func FormatProjectID() string {
 		return id[:4] + "..." + strconv.Itoa(len(id)) + " chars"
 	}
 	return id
+}
+
+// mapToCloudHTTPRequest converts a map (from slog.Group attrs) to a
+// gcplog.HTTPRequest for promotion to a top-level LogEntry field.
+func mapToCloudHTTPRequest(m map[string]any) *gcplog.HTTPRequest {
+	getString := func(key string) string {
+		if v, ok := m[key].(string); ok {
+			return v
+		}
+		return ""
+	}
+	getInt := func(key string) int {
+		switch v := m[key].(type) {
+		case int:
+			return v
+		case int64:
+			return int(v)
+		case float64:
+			return int(v)
+		}
+		return 0
+	}
+	getInt64 := func(key string) int64 {
+		switch v := m[key].(type) {
+		case int64:
+			return v
+		case int:
+			return int64(v)
+		case float64:
+			return int64(v)
+		}
+		return 0
+	}
+
+	method := getString("requestMethod")
+	rawURL := getString("requestUrl")
+	userAgent := getString("userAgent")
+	referer := getString("referer")
+	protocol := getString("protocol")
+	latencyStr := getString("latency")
+
+	// Build a minimal *http.Request for the Cloud Logging client.
+	parsedURL, _ := url.Parse(rawURL)
+	if parsedURL == nil {
+		parsedURL = &url.URL{}
+	}
+	req := &http.Request{
+		Method: method,
+		URL:    parsedURL,
+		Proto:  protocol,
+		Header: http.Header{},
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+
+	var latency time.Duration
+	if latencyStr != "" {
+		latency, _ = time.ParseDuration(latencyStr)
+	}
+
+	return &gcplog.HTTPRequest{
+		Request:      req,
+		RequestSize:  getInt64("requestSize"),
+		Status:       getInt("status"),
+		ResponseSize: getInt64("responseSize"),
+		Latency:      latency,
+		RemoteIP:     getString("remoteIp"),
+	}
 }

@@ -326,3 +326,86 @@ func TestNewCloudHandler_NoProject(t *testing.T) {
 		t.Error("expected error when no project ID available")
 	}
 }
+
+func TestMapToCloudHTTPRequest(t *testing.T) {
+	m := map[string]any{
+		"requestMethod": "POST",
+		"requestUrl":    "/api/v1/groves",
+		"requestSize":   int64(256),
+		"status":        int64(201),
+		"responseSize":  int64(128),
+		"userAgent":     "scion-cli/0.1.0",
+		"remoteIp":      "10.0.0.1:54321",
+		"referer":       "https://example.com",
+		"latency":       "0.042s",
+		"protocol":      "HTTP/1.1",
+	}
+
+	req := mapToCloudHTTPRequest(m)
+	if req == nil {
+		t.Fatal("expected non-nil HTTPRequest")
+	}
+	if req.Request.Method != "POST" {
+		t.Errorf("expected method POST, got %s", req.Request.Method)
+	}
+	if req.Request.URL.String() != "/api/v1/groves" {
+		t.Errorf("expected URL /api/v1/groves, got %s", req.Request.URL.String())
+	}
+	if req.RequestSize != 256 {
+		t.Errorf("expected requestSize=256, got %d", req.RequestSize)
+	}
+	if req.Status != 201 {
+		t.Errorf("expected status=201, got %d", req.Status)
+	}
+	if req.ResponseSize != 128 {
+		t.Errorf("expected responseSize=128, got %d", req.ResponseSize)
+	}
+	if req.Request.UserAgent() != "scion-cli/0.1.0" {
+		t.Errorf("expected userAgent=scion-cli/0.1.0, got %s", req.Request.UserAgent())
+	}
+	if req.RemoteIP != "10.0.0.1:54321" {
+		t.Errorf("expected remoteIp=10.0.0.1:54321, got %s", req.RemoteIP)
+	}
+	if req.Request.Referer() != "https://example.com" {
+		t.Errorf("expected referer=https://example.com, got %s", req.Request.Referer())
+	}
+	if req.Latency.Milliseconds() != 42 {
+		t.Errorf("expected latency=42ms, got %v", req.Latency)
+	}
+	if req.Request.Proto != "HTTP/1.1" {
+		t.Errorf("expected protocol=HTTP/1.1, got %s", req.Request.Proto)
+	}
+}
+
+func TestMapToCloudHTTPRequest_EmptyMap(t *testing.T) {
+	req := mapToCloudHTTPRequest(map[string]any{})
+	if req == nil {
+		t.Fatal("expected non-nil HTTPRequest even for empty map")
+	}
+	if req.Request == nil {
+		t.Fatal("expected non-nil underlying Request")
+	}
+	if req.Status != 0 {
+		t.Errorf("expected status=0, got %d", req.Status)
+	}
+}
+
+func TestCloudHandler_HostnameField(t *testing.T) {
+	h := &CloudHandler{
+		level:     slog.LevelInfo,
+		component: "test",
+		hostname:  "my-workstation",
+	}
+
+	// Verify hostname is preserved through WithAttrs
+	newH := h.WithAttrs([]slog.Attr{slog.String("key", "value")}).(*CloudHandler)
+	if newH.hostname != "my-workstation" {
+		t.Errorf("expected hostname=my-workstation, got %s", newH.hostname)
+	}
+
+	// Verify hostname is preserved through WithGroup
+	newH = h.WithGroup("grp").(*CloudHandler)
+	if newH.hostname != "my-workstation" {
+		t.Errorf("expected hostname=my-workstation, got %s", newH.hostname)
+	}
+}

@@ -349,7 +349,7 @@ func RequestLogMiddleware(logger *slog.Logger, component string, patterns []Path
 				attrs = append(attrs, slog.String(AttrTraceID, traceID))
 			}
 
-			logger.LogAttrs(ctx, level, "Request completed", attrs...)
+			logger.LogAttrs(ctx, level, "", attrs...)
 		})
 	}
 }
