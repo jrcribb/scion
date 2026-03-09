@@ -144,7 +144,7 @@ Users can authenticate the CLI against a Scion Hub using the following flow:
 Agents are automatically authenticated. When the Hub dispatches an agent to a Runtime Broker, it includes a one-time-use **Agent Token**.
 - The agent uses this token for all calls back to the Hub (e.g., updating status, streaming logs).
 - Tokens are scoped to the specific agent and its grove.
-- Tokens have a default expiration (typically 24 hours).
+- Tokens have a default expiration (typically 24 hours), but Scion implements an automated token refresh mechanism to ensure long-running agents maintain valid authorization throughout extended tasks.
 
 ## API Keys
 

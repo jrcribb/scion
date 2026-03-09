@@ -96,7 +96,23 @@ This creates a `.scion` directory in your project root containing:
 echo ".scion/agents" >> .gitignore
 ```
 
-### 2. Select Runtime
+### 2. Agent Authentication (LLM Access)
+
+Before starting an agent, you must provide credentials so the underlying LLM harness (Claude, Gemini, etc.) can authenticate with its model provider.
+
+Scion uses a **unified authentication pipeline** that automatically discovers credentials from your environment. For a quick start, export your provider's API key:
+
+```bash
+# For Claude
+export ANTHROPIC_API_KEY="your-api-key"
+
+# For Gemini
+export GEMINI_API_KEY="your-api-key"
+```
+
+Scion also supports Vertex AI (via Application Default Credentials) and OAuth token files. For advanced credential configurations, including Hub-based secret injection, see [Agent Credentials](../advanced-local/agent-credentials).
+
+### 3. Select Runtime
 Scion automatically selects the appropriate runtime based on your operating system:
 - **macOS**: Defaults to `container` (Apple Virtualization Framework).
 - **Linux/Windows**: Defaults to `docker` (or `podman` if Docker is missing).

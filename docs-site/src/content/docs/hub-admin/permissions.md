@@ -27,7 +27,12 @@ Scion uses a standardized set of actions:
 - **Administrative**: `manage`.
 - **Resource-Specific**: `start`, `stop`, `attach`, `message`.
 
-## Policy Model
+## Policy-Based Authorization
+
+Scion enforces strict policy-based authorization for all agent operations:
+- **Agent Creation**: Requires active membership in the target grove.
+- **Agent Interaction**: Interacting with an agent (e.g., via PTY/terminal or structured messaging) is restricted to the agent's owner (the creator) or system administrators.
+- **Agent Deletion**: Only the agent's owner or a system administrator can delete an agent.
 
 Scion uses a **Hierarchical Override Model** for policies. Policies can be attached at three levels:
 
@@ -41,6 +46,10 @@ When an action is attempted, Scion resolves effective permissions by traversing 
 - A policy at the **Grove level** overrides a global **Hub level** policy.
 
 This model allows for granular delegation, where grove owners can manage their own team's access without global administrator intervention.
+
+## Capability-Based Access Control
+
+The Hub API and Web UI utilize a capability gating system. Resource responses from the API include `_capabilities` annotations. These annotations explicitly state the actions the authenticated user is permitted to perform on that specific resource. This ensures granular UI controls (e.g., disabling the "Delete" button if the user lacks permission) and provides a secondary layer of API-level enforcement.
 
 ## Policy Structure
 
@@ -74,8 +83,8 @@ To simplify management, Scion provides built-in roles that bundle common permiss
 
 ## Implementation Status
 
-The permissions system is being rolled out in phases:
-- **Phase 1 (Current)**: Basic identity resolution and domain-based authorization.
-- **Phase 2 (In Progress)**: Implementation of Group and Policy schemas in the database.
-- **Phase 3**: Integration of authorization middleware into the Hub API.
-- **Phase 4**: User Interface for managing groups and policies in the Web Dashboard.
+The permissions system features:
+- **Identity Resolution**: Core identity and domain-based authorization.
+- **Capability Gating**: UI and API enforcement via `_capabilities`.
+- **Policy Enforcement**: Strict authorization for agent creation, interaction, and deletion based on grove membership and ownership.
+- **Group & Policy Management**: Full support for group and policy schemas in the database, manageable via the Web Dashboard.

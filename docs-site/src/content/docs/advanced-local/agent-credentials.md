@@ -18,19 +18,19 @@ Authentication setup depends heavily on how you are running Scion:
 
 ## Authentication Approaches
 
-Scion supports two approaches to harness authentication: the **Automatic (Implicit) Approach** and the **Explicit Path**.
+Scion supports two approaches to harness authentication: the **Automatic (Implicit) Approach** and the **Explicit Path**. Both utilize Scion's unified `ResolvedAuth` pipeline, which relies on a centralized `AuthConfig` gathering and late-binding logic to ensure the correct credentials are used.
 
 ### The Automatic (Implicit) Approach
 
-By default, when an agent starts, Scion runs a discovery pipeline to find all available credentials:
+By default, when an agent starts, Scion runs a unified authentication pipeline to discover and apply credentials:
 
-1. **Gather**: Scans environment variables and well-known file paths. In Hub mode, this only includes secrets and variables specifically injected into the agent.
-2. **Resolve**: The harness evaluates the gathered credentials and selects the best authentication method based on its internal priority order (e.g., usually preferring a direct API key over a credential file).
-3. **Validate & Apply**: Scion checks that the credentials are valid and configures the harness's native settings (e.g., writing to `.claude.json` or `settings.json`) to use them.
+1. **Gather (`AuthConfig`)**: Scans environment variables and well-known file paths. In Hub mode, this only includes secrets and variables specifically injected into the agent.
+2. **Resolve (`ResolveAuth`)**: The harness evaluates the gathered configuration and selects the best authentication method based on its internal priority order (e.g., usually preferring a direct API key over a credential file). This uses late-binding logic, so the final authentication strategy is decided right before the agent starts.
+3. **Validate & Apply (`ValidateAuth`)**: Scion validates that the selected credentials are correct and configures the harness's native settings (e.g., writing to `.claude.json` or `settings.json`) to use them.
 
 ### The Explicit Path
 
-You can override the automatic detection by explicitly forcing a specific authentication method in your agent's profile or template configuration (using the `auth_selectedType` field). 
+You can override the automatic detection by explicitly forcing a specific authentication method in your agent's profile or template configuration (using the `auth_selectedType` field). You can also override this on the fly when starting an agent by using the `--harness-auth` flag (e.g., `scion start my-agent --harness-auth vertex-ai`).
 
 When you configure the explicit path, the automatic fallback is disabled. The credentials required for your chosen method **must** be present (either gathered from the local environment or provided via Hub secrets), otherwise the agent will immediately fail to start.
 
