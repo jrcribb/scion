@@ -3,7 +3,6 @@ title: Local Configuration
 description: Configuring Scion for local development workflows.
 ---
 
-**Target Persona**: Power User (Advanced Local Usage)
 **What you will learn**: How to configure Scion beyond the defaults using `settings.yaml`, including custom profiles, local runtime overrides, and advanced workspace behaviors.
 
 When running Scion in **Solo Mode** (local-only), your configuration focuses on defining the environment in which your agents run. This guide explains how to use `settings.yaml` to customize your local workflow.

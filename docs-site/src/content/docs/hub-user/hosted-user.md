@@ -3,7 +3,6 @@ title: Team Workflow
 description: Connecting to a Scion Hub for team collaboration.
 ---
 
-**Target Persona**: Team Developer (Hub User)
 **What you will learn**: How to connect your local CLI to your organization's Scion Hub, dispatch agents remotely, use the Web Dashboard, and collaborate with your team.
 
 Scion's "Hosted" mode allows teams to share state, infrastructure, and agent configurations by connecting to a central Scion Hub.

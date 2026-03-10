@@ -3,7 +3,6 @@ title: Setting up the Scion Hub
 description: Installation and configuration of the Scion Hub (State Server).
 ---
 
-**Target Persona**: Platform Ops (Hub Administration)
 **What you will learn**: How to deploy, secure, and operate the Scion Hub infrastructure, including setting up persistence, configuring runtime brokers, and managing user access.
 
 The **Scion Hub** is the central brain of a hosted Scion architecture. It maintains the state of all agents, groves, and runtime brokers, and provides the API used by the CLI and Web Dashboard.

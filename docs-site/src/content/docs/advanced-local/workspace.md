@@ -1,5 +1,5 @@
 ---
-title: Agent Workspaces in Scion
+title: About Workspaces
 ---
 
 Every Scion agent has a dedicated **Workspace**, mounted at `/workspace` inside the agent's container. This is where the agent reads code, makes changes, and runs commands.
