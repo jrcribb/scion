@@ -30,7 +30,7 @@ Templates are stored as directories:
 
 Each template directory contains `scion-agent.yaml`, `system-prompt.md`, and optional files (skills/, agents.md, etc.).
 
-For git groves, the recent externalization change (d0507b1) moved settings and templates to the external grove-config directory (`~/.scion/grove-configs/<slug>__<uuid>/.scion/`), making them structurally consistent with non-git external groves.
+For git groves, templates live in the repository's `.scion/templates/` directory and are available after cloning. (Note: a recent change (d0507b1) moved templates to an external grove-config directory, but this will be reverted — see Section 4.2.)
 
 ### 2.2 Hub Template Storage
 
@@ -69,9 +69,9 @@ After evaluating several approaches (see [Appendix: Rejected Approaches](#append
 - **CLI path**: Auto-sync on grove link (Approach B)
 - **Web path**: In-container template sync via dummy agent (Approach C)
 
-### 3.1 CLI: Auto-Sync on Grove Link
+### 3.1 CLI: Explicit Sync with Auto-Prompt on Grove Link
 
-**Concept**: When a grove is linked to the Hub (`scion hub link`), automatically detect and sync grove-local templates to the Hub at grove scope.
+**Concept**: Template sync is always **explicit** — never automatic. When a grove is linked to the Hub (`scion hub link`), the CLI detects grove-local templates and prompts the user to sync them. Sync is **bidirectional**: templates can be pushed from local to Hub and pulled from Hub to local.
 
 **Flow**:
 1. `scion hub link` detects templates in `.scion/templates/`
@@ -101,7 +101,9 @@ After evaluating several approaches (see [Appendix: Rejected Approaches](#append
 - The `scion` CLI inside the container has access to all local templates
 - No special git access or broker APIs needed from the Hub
 
-**Hub-native groves**: These are the simplest case — templates are managed entirely on the Hub. The web UI can create/edit templates at grove scope directly without needing the in-container approach. Hub-native groves should take advantage of this direct path.
+**Container choice**: The dummy agent uses the `scion-base` container image (which includes the `scion` CLI) with the generic harness setting. It only needs Hub auth and endpoint environment variables — not a full LLM harness. The agent should be immediately deleted after the sync completes.
+
+**Hub-native groves**: These are the simplest case — templates are managed entirely on the Hub. No container-based sync is needed. Future improvements may add direct template creation/editing in the web UI, but for now hub-native grove templates are also managed via CLI and synced.
 
 ---
 
@@ -127,11 +129,9 @@ After evaluating several approaches (see [Appendix: Rejected Approaches](#append
 - Templates are in the externalized grove-config dir (not in git, broker-local)
 - Mix of both: some templates in repo, some external
 
-**Key insight**: The recent externalization change (d0507b1) means git grove templates now live in `~/.scion/grove-configs/<slug>__<uuid>/.scion/templates/` on the broker, **not** in the repo. This means:
-- Git grove templates behave like linked grove templates from the broker's perspective
-- Agents running in git groves create their worktree from the repo clone, but template resolution uses the external config dir
+**Key insight**: The recent externalization change (d0507b1) that moved git grove templates to `~/.scion/grove-configs/<slug>__<uuid>/.scion/templates/` was a mistake and will be reverted in a separate workstream. Templates for git groves should remain in the repository's `.scion/templates/` directory, ensuring they are version-controlled and available to all brokers after cloning.
 
-**Resolution**: The in-container sync approach (Section 3.2) works universally here — the dummy agent has access to both in-repo and externalized templates, and `scion templates sync --all` uploads everything it finds.
+**Resolution**: The in-container sync approach (Section 3.2) works here — after cloning the repo, the dummy agent has access to the in-repo templates, and `scion templates sync --all` uploads everything it finds.
 
 ### 4.3 Hub-Native Groves
 
@@ -206,10 +206,9 @@ custom-gemini       no       yes      hub only
 ### 5.5 Web UI Considerations
 
 The web UI needs to:
-1. Show a read-only list of loaded templates in the grove settings page
+1. Show a **read-only** list of synced templates in the grove settings page
 2. Provide a "Load Templates" button that triggers in-container sync
-3. Populate the agent creation form with available grove templates
-4. For hub-native groves, support direct template creation/editing inline
+3. Populate the agent creation form with **Hub-synced templates only** (no indication of unsynced local templates)
 
 ---
 
@@ -223,12 +222,12 @@ The web UI needs to:
 
 ### Phase 2: Web Template Loading (medium effort)
 - Implement "Load Templates" button in grove settings page
-- Launch dummy agent, exec `scion templates sync --all` in container
+- Launch dummy agent using `scion-base` container with generic harness, exec `scion templates sync --all`, then delete the agent
 - Display read-only template list in grove settings
-- Populate agent creation form with available grove-scoped templates
+- Populate agent creation form with Hub-synced grove-scoped templates only
 
-### Phase 3: Hub-Native Template Editing (medium effort)
-- Web UI support for creating/editing grove templates directly for hub-native groves
+### Phase 3: Future — Hub-Native Template Editing (deferred)
+- Web UI support for creating/editing grove templates directly (hub-native groves first)
 - Template content editor with file management
 - No container needed — direct Hub storage operations
 
@@ -236,18 +235,21 @@ The web UI needs to:
 
 ## 7. Open Questions
 
-### Architectural
-1. **Source of truth**: After a template is synced to the Hub, which version is authoritative - Hub or local filesystem? Should the Hub version be pushed back to brokers?
-2. **Sync direction**: Is sync unidirectional (local -> Hub) or bidirectional? If bidirectional, how to handle conflicts?
+### Resolved
 
-### UX
-3. **Web-first template creation**: Should the web UI support creating grove templates directly (Hub-native) for non-hub-native groves, or is the CLI the primary authoring tool?
-4. **Template visibility in agent creation**: When creating an agent from the web UI, should users only see Hub-synced templates, or also indicate that unsynced local templates may exist?
+1. **Sync direction**: Sync is **bidirectional** — templates can be pushed from local to Hub and pulled from Hub to local. However, sync is always **explicit** (never automatic). The `scion templates status` command (see Section 5.4) shows the current state, and can be integrated into `scion templates list` output as well.
 
-### Technical
-5. **Dummy agent lifecycle**: How long does the dummy agent for web-based template sync live? What cleanup is needed?
+2. **Web-first template creation**: For now, the Hub and web UI are **read-only** for grove templates — templates are authored locally and synced to the Hub. Future improvements may add direct template creation/editing in the web UI.
+
+3. **Template visibility in agent creation**: The web UI only shows templates that are currently synced to the Hub. It does not indicate whether unsynced local templates may exist on brokers.
+
+4. **Dummy agent lifecycle**: The dummy agent used for web-based template sync should only live long enough to perform the sync operation, then be immediately deleted. The container can use the `scion-base` image (which includes the `scion` CLI) with the generic harness setting, since it only needs Hub auth and endpoint configuration — not a full LLM harness.
+
+5. **Externalized git grove templates**: The recent change (d0507b1) that moved git grove templates to the external grove-config directory was a mistake and will be reverted in a separate workstream. Templates for git groves should remain in the repository's `.scion/templates/` directory.
+
+### Open
+
 6. **Content hash stability**: Are content hashes computed the same way on broker and Hub? (Currently yes - SHA-256 of concatenated file hashes)
-7. **Externalized git grove templates**: Since templates are now in the external config dir (not in-repo), what is the expected flow for a brand-new broker linking a git grove? The external config dir starts empty - how do templates get there?
 
 ---
 
@@ -273,5 +275,5 @@ Combined broker inventory reporting with lazy on-demand sync. Not selected in fa
 - [Decoupling Templates](decouple-templates.md) - Template/harness separation analysis
 - [Git Groves](hosted/git-groves.md) - Git grove architecture
 - [Hub Groves](hosted/hub-groves.md) - Hub-native grove design
-- [Settings Externalization](../commit d0507b1) - Recent change moving git grove config external
+- [Settings Externalization](../commit d0507b1) - Recent change moving git grove config external (template portion to be reverted)
 - [Agnostic Template Design](agnostic-template-design.md) - Harness-agnostic template system
