@@ -1,0 +1,1077 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package cmd
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"io"
+	"log"
+	"log/slog"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/GoogleCloudPlatform/scion/pkg/agent"
+	"github.com/GoogleCloudPlatform/scion/pkg/api"
+	"github.com/GoogleCloudPlatform/scion/pkg/apiclient"
+	"github.com/GoogleCloudPlatform/scion/pkg/broker"
+	"github.com/GoogleCloudPlatform/scion/pkg/brokercredentials"
+	"github.com/GoogleCloudPlatform/scion/pkg/config"
+	"github.com/GoogleCloudPlatform/scion/pkg/ent/entc"
+	"github.com/GoogleCloudPlatform/scion/pkg/harness"
+	"github.com/GoogleCloudPlatform/scion/pkg/hub"
+	"github.com/GoogleCloudPlatform/scion/pkg/runtime"
+	"github.com/GoogleCloudPlatform/scion/pkg/runtimebroker"
+	"github.com/GoogleCloudPlatform/scion/pkg/secret"
+	"github.com/GoogleCloudPlatform/scion/pkg/storage"
+	"github.com/GoogleCloudPlatform/scion/pkg/store"
+	"github.com/GoogleCloudPlatform/scion/pkg/store/entadapter"
+	"github.com/GoogleCloudPlatform/scion/pkg/store/sqlite"
+	"github.com/GoogleCloudPlatform/scion/pkg/util"
+	"github.com/GoogleCloudPlatform/scion/pkg/util/logging"
+	"github.com/spf13/cobra"
+)
+
+func runServerStart(cmd *cobra.Command, args []string) error {
+	// 1. Initialize logging
+	logCleanups, requestLogger, messageLogger, err := initServerLogging(cmd)
+	if err != nil {
+		return err
+	}
+	for _, cleanup := range logCleanups {
+		defer cleanup()
+	}
+
+	// 2. Load & reconcile config
+	cfg, err := loadAndReconcileConfig(cmd)
+	if err != nil {
+		return err
+	}
+
+	// 3. Resolve admin mode settings
+	adminMode := cfg.AdminMode
+	if v := os.Getenv("SCION_SERVER_ADMIN_MODE"); v != "" {
+		adminMode = v == "true" || v == "1" || v == "yes"
+	}
+	maintenanceMessage := cfg.MaintenanceMessage
+	if v := os.Getenv("SCION_SERVER_MAINTENANCE_MESSAGE"); v != "" {
+		maintenanceMessage = v
+	}
+
+	// 4. Ensure global directory exists
+	globalDir, err := config.GetGlobalDir()
+	if err != nil {
+		return fmt.Errorf("failed to get global directory: %w", err)
+	}
+	if _, err := os.Stat(globalDir); os.IsNotExist(err) {
+		log.Println("Initializing global scion directory...")
+		if err := config.InitGlobal(harness.All()); err != nil {
+			return fmt.Errorf("failed to initialize global config: %w", err)
+		}
+	}
+
+	// When --global is set, change to the home directory so the server
+	// operates from the global grove context regardless of where it was launched.
+	if globalMode {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		if err := os.Chdir(home); err != nil {
+			return fmt.Errorf("failed to change to home directory: %w", err)
+		}
+		log.Printf("Global mode: changed working directory to %s", home)
+	}
+
+	// Warn if running from within a project grove instead of the global (~/.scion) grove.
+	if projectDir, ok := config.FindProjectRoot(); ok {
+		if projectDir != globalDir {
+			parentDir := filepath.Dir(projectDir)
+			fmt.Fprintf(os.Stderr, "\n%s%s WARNING: Server is running from a project grove context (%s)%s\n",
+				util.Bold, util.Yellow, parentDir, util.Reset)
+			fmt.Fprintf(os.Stderr, "%s%s          The runtime broker will use this grove's templates and settings.%s\n",
+				util.Bold, util.Yellow, util.Reset)
+			fmt.Fprintf(os.Stderr, "%s%s          For machine-wide operation, run the server from outside any project grove.%s\n\n",
+				util.Bold, util.Yellow, util.Reset)
+		}
+	}
+
+	// 5. Check if at least one server is enabled
+	if !enableHub && !cfg.RuntimeBroker.Enabled && !enableWeb {
+		return fmt.Errorf("no server components enabled; use --enable-hub, --enable-runtime-broker, or --enable-web")
+	}
+
+	// 6. Check ports
+	if err := checkServerPorts(cfg); err != nil {
+		return err
+	}
+
+	// Log server mode
+	if productionMode {
+		log.Println("Server mode: production")
+	} else {
+		log.Printf("Server mode: workstation (binding to %s)", cfg.Hub.Host)
+	}
+	if enableDebug {
+		log.Println("Debug logging enabled")
+		logOAuthDebug(cfg)
+	}
+
+	// 7. Setup graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigCh
+		log.Printf("Received signal %v, shutting down...", sig)
+		cancel()
+	}()
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 3)
+
+	// 8. Initialize store
+	var s store.Store
+	if enableHub {
+		s, err = initStore(cfg)
+		if err != nil {
+			return err
+		}
+		if closer, ok := s.(io.Closer); ok {
+			defer closer.Close()
+		}
+	}
+
+	// Load settings early so both Hub and Broker can use grove-level hub.endpoint.
+	brokerSettings, err := config.LoadSettings("")
+	if err != nil {
+		log.Printf("Warning: failed to load settings: %v", err)
+		brokerSettings = &config.Settings{}
+	}
+	if brokerSettings.Hub == nil {
+		brokerSettings.Hub = &config.HubClientConfig{}
+	}
+
+	// 9. Initialize dev auth
+	var devAuthToken string
+	if cfg.Auth.Enabled {
+		devAuthToken, err = initDevAuth(cfg, globalDir)
+		if err != nil {
+			return err
+		}
+	}
+
+	// 10. Resolve hub endpoint
+	hubEndpoint := resolveHubEndpoint(cfg, brokerSettings)
+
+	// Parse admin emails
+	adminEmailList := parseAdminEmails(cfg)
+
+	// 11. Start Hub
+	var hubSrv *hub.Server
+	if enableHub {
+		hubSrv = initHubServer(ctx, cfg, s, hubEndpoint, devAuthToken, adminEmailList, adminMode, maintenanceMessage, requestLogger, messageLogger, globalDir)
+
+		if !enableWeb {
+			// Hub runs its own HTTP server (standalone mode).
+			eventPub := hub.NewChannelEventPublisher()
+			hubSrv.SetEventPublisher(eventPub)
+
+			log.Printf("Starting Hub API server on %s:%d", cfg.Hub.Host, cfg.Hub.Port)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := hubSrv.Start(ctx); err != nil {
+					errCh <- fmt.Errorf("hub server error: %w", err)
+				}
+			}()
+		} else {
+			// Combined mode: Hub API is mounted on the Web server.
+			hubSrv.StartBackgroundServices(ctx)
+			log.Printf("Hub API will be mounted on Web server (port %d)", webPort)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-ctx.Done()
+				hubSrv.CleanupResources(context.Background())
+			}()
+		}
+	}
+
+	// 12. Start Web
+	var webSrv *hub.WebServer
+	if enableWeb {
+		webSrv = initWebServer(cfg, hubSrv, devAuthToken, adminEmailList, adminMode, maintenanceMessage, requestLogger)
+
+		log.Printf("Starting Web Frontend on %s:%d", cfg.Hub.Host, webPort)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := webSrv.Start(ctx); err != nil {
+				errCh <- fmt.Errorf("web server error: %w", err)
+			}
+		}()
+	}
+
+	// 13. Start Broker
+	if cfg.RuntimeBroker.Enabled {
+		if err := startRuntimeBroker(ctx, cmd, cfg, hubSrv, webSrv, s, hubEndpoint, devAuthToken, brokerSettings, globalDir, requestLogger, messageLogger, &wg, errCh); err != nil {
+			return err
+		}
+	}
+
+	// 14. Set up dispatcher and notification dispatcher
+	if enableHub && hubSrv != nil {
+		dispatcher := hubSrv.CreateAuthenticatedDispatcher()
+		hubSrv.SetDispatcher(dispatcher)
+		log.Printf("Agent dispatcher configured (HTTP-based)")
+		hubSrv.StartNotificationDispatcher()
+	}
+
+	// 15. Print startup banner
+	if !productionMode {
+		log.Println("Scion server ready (workstation mode)")
+		if enableWeb {
+			displayHost := cfg.Hub.Host
+			if displayHost == "0.0.0.0" || displayHost == "" {
+				displayHost = "127.0.0.1"
+			}
+			log.Printf("Web UI: http://%s:%d", displayHost, webPort)
+		}
+		if devAuthToken != "" {
+			log.Printf("Dev token: export SCION_DEV_TOKEN=%s", devAuthToken)
+		}
+	}
+
+	// 16. Wait for either an error or context cancellation
+	select {
+	case err := <-errCh:
+		cancel()
+		return err
+	case <-ctx.Done():
+		wg.Wait()
+		return nil
+	}
+}
+
+// initServerLogging initializes all logging subsystems and returns cleanup functions.
+func initServerLogging(cmd *cobra.Command) (cleanups []func(), requestLogger *slog.Logger, messageLogger *slog.Logger, err error) {
+	useGCP := os.Getenv("SCION_LOG_GCP") == "true"
+	if os.Getenv("K_SERVICE") != "" {
+		useGCP = true
+	}
+	if !productionMode && os.Getenv("SCION_LOG_GCP") == "" {
+		useGCP = false
+	}
+
+	component := "scion-server"
+	if enableHub && !enableRuntimeBroker {
+		component = "scion-hub"
+	} else if !enableHub && enableRuntimeBroker {
+		component = "scion-broker"
+	}
+
+	// Initialize OTel logging
+	ctx := context.Background()
+	logProvider, logCleanup, otelErr := logging.InitOTelLogging(ctx, logging.OTelConfig{})
+	if otelErr != nil {
+		log.Printf("Warning: failed to initialize OTel logging: %v", otelErr)
+	}
+	if logCleanup != nil {
+		cleanups = append(cleanups, logCleanup)
+	}
+
+	// Initialize direct Cloud Logging
+	var cloudHandler slog.Handler
+	if logging.IsCloudLoggingEnabled() {
+		logLevel := logging.ResolveLogLevel(enableDebug)
+		cfg := logging.CloudLoggingConfig{
+			Component: component,
+		}
+		ch, cloudLogCleanup, cloudErr := logging.NewCloudHandler(ctx, cfg, logLevel)
+		if cloudErr != nil {
+			log.Printf("Warning: failed to initialize Cloud Logging: %v", cloudErr)
+		} else {
+			cloudHandler = ch
+			cleanups = append(cleanups, cloudLogCleanup)
+			log.Printf("Cloud Logging enabled (logId=%s, project=%s)", logging.FormatLogID(), logging.FormatProjectID())
+		}
+	}
+
+	logging.SetupWithOTel(component, enableDebug, useGCP, logProvider, cloudHandler)
+
+	// Initialize request logger
+	reqLogCfg := logging.RequestLoggerConfig{
+		FilePath:   os.Getenv(logging.EnvRequestLogPath),
+		Component:  component,
+		UseGCP:     useGCP,
+		Foreground: serverStartForeground,
+		Level:      logging.ResolveLogLevel(enableDebug),
+	}
+	if ch, ok := cloudHandler.(*logging.CloudHandler); ok && ch != nil {
+		reqLogCfg.CloudClient = ch.Client()
+		reqLogCfg.ProjectID = logging.FormatProjectID()
+	}
+	requestLogger, reqLogCleanup, reqErr := logging.NewRequestLogger(reqLogCfg)
+	if reqErr != nil {
+		slog.Warn("Failed to initialize request logger", "error", reqErr)
+		requestLogger = slog.New(slog.NewJSONHandler(io.Discard, nil))
+	}
+	if reqLogCleanup != nil {
+		cleanups = append(cleanups, reqLogCleanup)
+	}
+
+	// Initialize message logger
+	msgLogCfg := logging.MessageLoggerConfig{
+		Component: component,
+		UseGCP:    useGCP,
+		Level:     logging.ResolveLogLevel(enableDebug),
+	}
+	if ch, ok := cloudHandler.(*logging.CloudHandler); ok && ch != nil {
+		msgLogCfg.CloudClient = ch.Client()
+	}
+	messageLogger, msgLogCleanup, msgErr := logging.NewMessageLogger(msgLogCfg)
+	if msgErr != nil {
+		slog.Warn("Failed to initialize message logger", "error", msgErr)
+		messageLogger = nil
+	}
+	if msgLogCleanup != nil {
+		cleanups = append(cleanups, msgLogCleanup)
+	}
+
+	return cleanups, requestLogger, messageLogger, nil
+}
+
+// loadAndReconcileConfig loads the server configuration file and reconciles
+// it with command-line flags and workstation defaults.
+func loadAndReconcileConfig(cmd *cobra.Command) (*config.GlobalConfig, error) {
+	cfg, err := config.LoadGlobalConfig(serverConfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
+
+	// Check if production mode is set in config
+	if !cmd.Flags().Changed("production") {
+		if cfg.Mode == "production" {
+			productionMode = true
+		}
+	}
+
+	// Apply workstation defaults
+	if !productionMode {
+		applyWorkstationDefaults(cmd)
+		cfg.RuntimeBroker.Enabled = enableRuntimeBroker
+		cfg.Auth.Enabled = enableDevAuth
+		if !cmd.Flags().Changed("host") {
+			cfg.Hub.Host = "127.0.0.1"
+			cfg.RuntimeBroker.Host = "127.0.0.1"
+		}
+		if !cmd.Flags().Changed("storage-bucket") {
+			cfg.Storage.Provider = "local"
+		}
+		cfg.Secrets.Backend = "local"
+	}
+
+	// Override with command-line flags
+	if cmd.Flags().Changed("port") {
+		cfg.Hub.Port = hubPort
+	}
+	if cmd.Flags().Changed("host") {
+		cfg.Hub.Host = hubHost
+	}
+	if cmd.Flags().Changed("db") {
+		cfg.Database.URL = dbURL
+	}
+	if cmd.Flags().Changed("enable-runtime-broker") {
+		cfg.RuntimeBroker.Enabled = enableRuntimeBroker
+	}
+	if cmd.Flags().Changed("runtime-broker-port") {
+		cfg.RuntimeBroker.Port = runtimeBrokerPort
+	}
+	if cmd.Flags().Changed("dev-auth") {
+		cfg.Auth.Enabled = enableDevAuth
+	}
+	if cmd.Flags().Changed("storage-bucket") {
+		cfg.Storage.Bucket = storageBucket
+	}
+	if cmd.Flags().Changed("storage-dir") {
+		cfg.Storage.LocalPath = storageDir
+	}
+
+	// Fallback to legacy environment variable
+	if cfg.Storage.Bucket == "" && productionMode {
+		if val := os.Getenv("SCION_HUB_STORAGE_BUCKET"); val != "" {
+			cfg.Storage.Bucket = val
+			if cfg.Storage.Provider == "local" || cfg.Storage.Provider == "" {
+				cfg.Storage.Provider = "gcs"
+			}
+		}
+	}
+
+	// Update local variables from cfg
+	storageBucket = cfg.Storage.Bucket
+	storageDir = cfg.Storage.LocalPath
+	if storageBucket != "" && (cfg.Storage.Provider == "local" || cfg.Storage.Provider == "") {
+		cfg.Storage.Provider = "gcs"
+	}
+
+	return cfg, nil
+}
+
+// checkServerPorts checks that required server ports are available.
+func checkServerPorts(cfg *config.GlobalConfig) error {
+	if enableHub && !enableWeb {
+		status := checkPort(cfg.Hub.Host, cfg.Hub.Port)
+		if status.inUse {
+			if status.isScionServer {
+				return fmt.Errorf("a scion server is already running on port %d\nUse 'scion server status' to check or 'scion server stop' to stop it", cfg.Hub.Port)
+			}
+			return fmt.Errorf("Hub port %d is already in use by another process", cfg.Hub.Port)
+		}
+	}
+	if cfg.RuntimeBroker.Enabled {
+		status := checkPort(cfg.RuntimeBroker.Host, cfg.RuntimeBroker.Port)
+		if status.inUse {
+			if status.isScionServer {
+				return fmt.Errorf("a scion server is already running on port %d\nUse 'scion server status' to check or 'scion server stop' to stop it", cfg.RuntimeBroker.Port)
+			}
+			return fmt.Errorf("Runtime Broker port %d is already in use by another process", cfg.RuntimeBroker.Port)
+		}
+	}
+	if enableWeb {
+		webHost := cfg.Hub.Host
+		if webHost == "" {
+			webHost = "0.0.0.0"
+		}
+		status := checkPort(webHost, webPort)
+		if status.inUse {
+			if status.isScionServer {
+				return fmt.Errorf("a scion server is already running on port %d\nUse 'scion server status' to check or 'scion server stop' to stop it", webPort)
+			}
+			return fmt.Errorf("Web Frontend port %d is already in use by another process", webPort)
+		}
+	}
+	return nil
+}
+
+// initStore initializes the database store.
+func initStore(cfg *config.GlobalConfig) (store.Store, error) {
+	switch cfg.Database.Driver {
+	case "sqlite":
+		sqliteStore, err := sqlite.New(cfg.Database.URL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open database: %w", err)
+		}
+
+		if err := sqliteStore.Migrate(context.Background()); err != nil {
+			sqliteStore.Close()
+			return nil, fmt.Errorf("failed to run migrations: %w", err)
+		}
+
+		entDSN := cfg.Database.URL + "_ent"
+		entClient, err := entc.OpenSQLite("file:" + entDSN + "?cache=shared")
+		if err != nil {
+			sqliteStore.Close()
+			return nil, fmt.Errorf("failed to open ent database: %w", err)
+		}
+		if err := entc.AutoMigrate(context.Background(), entClient); err != nil {
+			entClient.Close()
+			sqliteStore.Close()
+			return nil, fmt.Errorf("failed to run ent migrations: %w", err)
+		}
+
+		s := entadapter.NewCompositeStore(sqliteStore, entClient)
+
+		if err := s.Ping(context.Background()); err != nil {
+			sqliteStore.Close()
+			return nil, fmt.Errorf("database ping failed: %w", err)
+		}
+
+		return s, nil
+	default:
+		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Database.Driver)
+	}
+}
+
+// initDevAuth initializes dev authentication and returns the token.
+func initDevAuth(cfg *config.GlobalConfig, globalDir string) (string, error) {
+	devAuthCfg := apiclient.DevAuthConfig{
+		Enabled:   cfg.Auth.Enabled,
+		Token:     cfg.Auth.Token,
+		TokenFile: cfg.Auth.TokenFile,
+	}
+
+	devAuthToken, err := apiclient.InitDevAuth(devAuthCfg, globalDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to initialize dev auth: %w", err)
+	}
+
+	os.Setenv("SCION_DEV_TOKEN", devAuthToken)
+	os.Setenv("SCION_AUTH_TOKEN", devAuthToken)
+
+	log.Println("WARNING: Development authentication enabled - not for production use")
+	log.Printf("Dev token: %s", devAuthToken)
+	log.Printf("To authenticate CLI commands, run:")
+	log.Printf("  export SCION_DEV_TOKEN=%s", devAuthToken)
+
+	return devAuthToken, nil
+}
+
+// resolveHubEndpoint determines the Hub's public endpoint URL.
+func resolveHubEndpoint(cfg *config.GlobalConfig, brokerSettings *config.Settings) string {
+	hubEndpoint := cfg.Hub.Endpoint
+	if hubEndpoint == "" && enableHub {
+		if baseURL := os.Getenv("SCION_SERVER_BASE_URL"); baseURL != "" {
+			hubEndpoint = strings.TrimRight(baseURL, "/")
+			if enableDebug {
+				log.Printf("Hub endpoint resolved from SCION_SERVER_BASE_URL: %s", hubEndpoint)
+			}
+		} else {
+			port := cfg.Hub.Port
+			if enableWeb {
+				port = webPort
+			}
+			hubEndpoint = fmt.Sprintf("http://localhost:%d", port)
+			if enableDebug {
+				log.Printf("Auto-computed hub endpoint for combo mode: %s", hubEndpoint)
+			}
+		}
+	} else if hubEndpoint == "" {
+		hubEndpoint = brokerSettings.GetHubEndpoint()
+		if hubEndpoint != "" && enableDebug {
+			log.Printf("Hub endpoint resolved from grove settings: %s", hubEndpoint)
+		}
+	}
+	return hubEndpoint
+}
+
+// parseAdminEmails parses admin emails from the flag or config.
+func parseAdminEmails(cfg *config.GlobalConfig) []string {
+	var adminEmailList []string
+	if adminEmails != "" {
+		for _, email := range strings.Split(adminEmails, ",") {
+			email = strings.TrimSpace(email)
+			if email != "" {
+				adminEmailList = append(adminEmailList, email)
+			}
+		}
+	} else if len(cfg.Hub.AdminEmails) > 0 {
+		adminEmailList = cfg.Hub.AdminEmails
+	}
+	if len(adminEmailList) > 0 {
+		log.Printf("Admin emails configured: %v", adminEmailList)
+	}
+	return adminEmailList
+}
+
+// initHubServer creates and configures the Hub server.
+func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store, hubEndpoint, devAuthToken string, adminEmailList []string, adminMode bool, maintenanceMessage string, requestLogger, messageLogger *slog.Logger, globalDir string) *hub.Server {
+	hubCfg := hub.ServerConfig{
+		Port:                  cfg.Hub.Port,
+		Host:                  cfg.Hub.Host,
+		ReadTimeout:           cfg.Hub.ReadTimeout,
+		WriteTimeout:          cfg.Hub.WriteTimeout,
+		CORSEnabled:           cfg.Hub.CORSEnabled,
+		CORSAllowedOrigins:    cfg.Hub.CORSAllowedOrigins,
+		CORSAllowedMethods:    cfg.Hub.CORSAllowedMethods,
+		CORSAllowedHeaders:    cfg.Hub.CORSAllowedHeaders,
+		CORSMaxAge:            cfg.Hub.CORSMaxAge,
+		DevAuthToken:          devAuthToken,
+		Debug:                 enableDebug,
+		AuthorizedDomains:     cfg.Auth.AuthorizedDomains,
+		AdminEmails:           adminEmailList,
+		HubEndpoint:           hubEndpoint,
+		SoftDeleteRetention:   cfg.Hub.SoftDeleteRetention,
+		SoftDeleteRetainFiles: cfg.Hub.SoftDeleteRetainFiles,
+		AdminMode:             adminMode,
+		MaintenanceMessage:    maintenanceMessage,
+		TelemetryDefault:      cfg.TelemetryEnabled,
+		BrokerAuthConfig:      hub.DefaultBrokerAuthConfig(),
+		OAuthConfig: hub.OAuthConfig{
+			Web: hub.OAuthClientConfig{
+				Google: hub.OAuthProviderConfig{
+					ClientID:     cfg.OAuth.Web.Google.ClientID,
+					ClientSecret: cfg.OAuth.Web.Google.ClientSecret,
+				},
+				GitHub: hub.OAuthProviderConfig{
+					ClientID:     cfg.OAuth.Web.GitHub.ClientID,
+					ClientSecret: cfg.OAuth.Web.GitHub.ClientSecret,
+				},
+			},
+			CLI: hub.OAuthClientConfig{
+				Google: hub.OAuthProviderConfig{
+					ClientID:     cfg.OAuth.CLI.Google.ClientID,
+					ClientSecret: cfg.OAuth.CLI.Google.ClientSecret,
+				},
+				GitHub: hub.OAuthProviderConfig{
+					ClientID:     cfg.OAuth.CLI.GitHub.ClientID,
+					ClientSecret: cfg.OAuth.CLI.GitHub.ClientSecret,
+				},
+			},
+			Device: hub.OAuthClientConfig{
+				Google: hub.OAuthProviderConfig{
+					ClientID:     cfg.OAuth.Device.Google.ClientID,
+					ClientSecret: cfg.OAuth.Device.Google.ClientSecret,
+				},
+				GitHub: hub.OAuthProviderConfig{
+					ClientID:     cfg.OAuth.Device.GitHub.ClientID,
+					ClientSecret: cfg.OAuth.Device.GitHub.ClientSecret,
+				},
+			},
+		},
+	}
+
+	hubSrv := hub.New(hubCfg, s)
+	hubSrv.SetRequestLogger(requestLogger)
+	if messageLogger != nil {
+		hubSrv.SetMessageLogger(messageLogger)
+	}
+
+	// Load notification channels from versioned settings
+	if vs, err := config.LoadVersionedSettings(""); err == nil && vs.Server != nil && len(vs.Server.NotificationChannels) > 0 {
+		channelConfigs := make([]hub.ChannelConfig, len(vs.Server.NotificationChannels))
+		for i, c := range vs.Server.NotificationChannels {
+			channelConfigs[i] = hub.ChannelConfig{
+				Type:             c.Type,
+				Params:           c.Params,
+				FilterTypes:      c.FilterTypes,
+				FilterUrgentOnly: c.FilterUrgentOnly,
+			}
+		}
+		registry := hub.NewChannelRegistry(channelConfigs, logging.Subsystem("hub.notification-channels"))
+		hubSrv.SetChannelRegistry(registry)
+		log.Printf("Notification channels configured: %d channel(s) registered", registry.Len())
+	}
+
+	// Initialize message broker from versioned settings
+	if vs, err := config.LoadVersionedSettings(""); err == nil && vs.Server != nil && vs.Server.MessageBroker != nil && vs.Server.MessageBroker.Enabled {
+		brokerType := vs.Server.MessageBroker.Type
+		if brokerType == "" {
+			brokerType = "inprocess"
+		}
+		switch brokerType {
+		case "inprocess":
+			b := broker.NewInProcessBroker(logging.Subsystem("hub.broker.inprocess"))
+			hubSrv.StartMessageBroker(b)
+			log.Printf("Message broker started: type=%s", brokerType)
+		default:
+			log.Printf("Warning: unknown message broker type %q, skipping", brokerType)
+		}
+	}
+
+	// Initialize storage
+	initHubStorage(ctx, hubSrv, cfg, globalDir)
+
+	// Initialize secret backend
+	secretBackend, err := secret.NewBackend(ctx, cfg.Secrets.Backend, s, secret.GCPBackendConfig{
+		ProjectID:       cfg.Secrets.GCPProjectID,
+		CredentialsJSON: cfg.Secrets.GCPCredentials,
+	})
+	if err != nil {
+		log.Printf("Warning: failed to initialize secret backend: %v", err)
+	} else {
+		hubSrv.SetSecretBackend(secretBackend)
+		log.Printf("Secret backend configured: %s", cfg.Secrets.Backend)
+	}
+
+	// Bootstrap local templates into Hub if database is empty
+	globalTemplatesDir := filepath.Join(globalDir, "templates")
+	if err := hubSrv.BootstrapTemplatesFromDir(ctx, globalTemplatesDir); err != nil {
+		log.Printf("Warning: template bootstrap failed: %v", err)
+	}
+
+	log.Printf("Database: %s (%s)", cfg.Database.Driver, cfg.Database.URL)
+
+	return hubSrv
+}
+
+// initHubStorage initializes the storage backend for the Hub server.
+func initHubStorage(ctx context.Context, hubSrv *hub.Server, cfg *config.GlobalConfig, globalDir string) {
+	if storageBucket != "" {
+		log.Printf("Initializing GCS storage with bucket: %s", storageBucket)
+		storageCfg := storage.Config{
+			Provider: storage.ProviderGCS,
+			Bucket:   storageBucket,
+		}
+		stor, err := storage.New(ctx, storageCfg)
+		if err != nil {
+			log.Printf("Warning: failed to initialize GCS storage: %v", err)
+			return
+		}
+		hubSrv.SetStorage(stor)
+		log.Printf("GCS storage configured: gs://%s", storageBucket)
+	} else if storageDir != "" {
+		log.Printf("Initializing local storage at: %s", storageDir)
+		storageCfg := storage.Config{
+			Provider:  storage.ProviderLocal,
+			LocalPath: storageDir,
+		}
+		stor, err := storage.New(ctx, storageCfg)
+		if err != nil {
+			log.Printf("Warning: failed to initialize local storage: %v", err)
+			return
+		}
+		hubSrv.SetStorage(stor)
+		log.Printf("Local storage configured: %s", storageDir)
+	} else {
+		defaultStorageDir := filepath.Join(globalDir, "storage")
+		log.Printf("WARNING: No storage backend configured. Using local filesystem storage at: %s", defaultStorageDir)
+		log.Printf("  For production use, configure --storage-bucket (GCS) or --storage-dir (explicit local path)")
+		storageCfg := storage.Config{
+			Provider:  storage.ProviderLocal,
+			LocalPath: defaultStorageDir,
+			Bucket:    "local",
+		}
+		stor, err := storage.New(ctx, storageCfg)
+		if err != nil {
+			log.Printf("Warning: failed to initialize local storage fallback: %v", err)
+			return
+		}
+		hubSrv.SetStorage(stor)
+	}
+}
+
+// initWebServer creates and configures the Web server.
+func initWebServer(cfg *config.GlobalConfig, hubSrv *hub.Server, devAuthToken string, adminEmailList []string, adminMode bool, maintenanceMessage string, requestLogger *slog.Logger) *hub.WebServer {
+	webHost := cfg.Hub.Host
+	if webHost == "" {
+		webHost = "0.0.0.0"
+	}
+
+	// Allow env var overrides for session/OAuth config
+	sessionSecret := webSessionSecret
+	if sessionSecret == "" {
+		sessionSecret = os.Getenv("SCION_SERVER_SESSION_SECRET")
+	}
+	baseURL := webBaseURL
+	if baseURL == "" {
+		baseURL = os.Getenv("SCION_SERVER_BASE_URL")
+	}
+	if baseURL == "" {
+		baseURL = fmt.Sprintf("http://localhost:%d", webPort)
+	}
+
+	// Resolve authorized domains and admin email list for the web server
+	var webAuthorizedDomains []string
+	var webAdminEmails []string
+	if len(cfg.Auth.AuthorizedDomains) > 0 {
+		webAuthorizedDomains = cfg.Auth.AuthorizedDomains
+	}
+	if adminEmails != "" {
+		for _, email := range strings.Split(adminEmails, ",") {
+			email = strings.TrimSpace(email)
+			if email != "" {
+				webAdminEmails = append(webAdminEmails, email)
+			}
+		}
+	} else if len(cfg.Hub.AdminEmails) > 0 {
+		webAdminEmails = cfg.Hub.AdminEmails
+	}
+
+	webCfg := hub.WebServerConfig{
+		Port:               webPort,
+		Host:               webHost,
+		AssetsDir:          webAssetsDir,
+		Debug:              enableDebug,
+		SessionSecret:      sessionSecret,
+		BaseURL:            baseURL,
+		DevAuthToken:       devAuthToken,
+		AuthorizedDomains:  webAuthorizedDomains,
+		AdminEmails:        webAdminEmails,
+		AdminMode:          adminMode,
+		MaintenanceMessage: maintenanceMessage,
+	}
+	webSrv := hub.NewWebServer(webCfg)
+	webSrv.SetRequestLogger(requestLogger)
+
+	// Create shared event publisher for real-time SSE
+	eventPub := hub.NewChannelEventPublisher()
+	webSrv.SetEventPublisher(eventPub)
+
+	// Wire Hub services into WebServer if Hub is enabled
+	if hubSrv != nil {
+		hubSrv.SetEventPublisher(eventPub)
+		webSrv.SetOAuthService(hubSrv.GetOAuthService())
+		webSrv.SetStore(hubSrv.GetStore())
+		webSrv.SetUserTokenService(hubSrv.GetUserTokenService())
+		webSrv.SetMaintenanceState(hubSrv.GetMaintenanceState())
+		webSrv.MountHubAPI(hubSrv.Handler(), hubSrv.CleanupResources)
+
+		localHubSrv := hubSrv
+		webSrv.SetHubHealthProvider(func(ctx context.Context) interface{} {
+			return localHubSrv.GetHealthInfo(ctx)
+		})
+	}
+
+	return webSrv
+}
+
+// startRuntimeBroker initializes and starts the runtime broker server.
+func startRuntimeBroker(ctx context.Context, cmd *cobra.Command, cfg *config.GlobalConfig, hubSrv *hub.Server, webSrv *hub.WebServer, s store.Store, hubEndpoint, devAuthToken string, brokerSettings *config.Settings, globalDir string, requestLogger, messageLogger *slog.Logger, wg *sync.WaitGroup, errCh chan error) error {
+	rt := runtime.GetRuntime("", "")
+	log.Printf("Runtime broker using runtime: %s", rt.Name())
+
+	mgr := agent.NewManager(rt)
+	settings := brokerSettings
+
+	// Try loading versioned settings to get broker identity from server.broker
+	versionedSettings, _, vsErr := config.LoadEffectiveSettings("")
+	var vsBroker *config.V1BrokerConfig
+	if vsErr == nil && versionedSettings != nil && versionedSettings.Server != nil {
+		vsBroker = versionedSettings.Server.Broker
+	}
+
+	// Resolve broker ID
+	brokerID := resolveBrokerID(cfg, settings, vsBroker, globalDir)
+
+	// Resolve broker name
+	brokerName := resolveBrokerName(cfg, settings, vsBroker)
+
+	// Enrich logger with broker_id
+	slog.SetDefault(slog.Default().With(slog.String(logging.AttrBrokerID, brokerID)))
+
+	// Resolve hub endpoint for the runtime broker
+	hubEndpointForRH := resolveHubEndpointForBroker(cfg, hubEndpoint, settings)
+
+	// Auto-provide defaults
+	if enableHub && !cmd.Flags().Changed("auto-provide") {
+		if vsBroker != nil && vsBroker.AutoProvide != nil {
+			serverAutoProvide = *vsBroker.AutoProvide
+		} else {
+			serverAutoProvide = true
+		}
+	}
+
+	// Co-located registration and credential generation
+	var inMemoryCreds *brokercredentials.BrokerCredentials
+	var colocatedBrokerRegistered bool
+	if enableHub && !simulateRemoteBroker && s != nil {
+		rhEndpoint := fmt.Sprintf("http://%s:%d", cfg.RuntimeBroker.Host, cfg.RuntimeBroker.Port)
+		if cfg.RuntimeBroker.Host == "0.0.0.0" {
+			rhEndpoint = fmt.Sprintf("http://localhost:%d", cfg.RuntimeBroker.Port)
+		}
+
+		effectiveID, regErr := registerGlobalGroveAndBroker(ctx, s, brokerID, brokerName, rhEndpoint, rt, serverAutoProvide, brokerSettings)
+		if regErr != nil {
+			log.Printf("Warning: failed to register global grove: %v", regErr)
+		} else {
+			colocatedBrokerRegistered = true
+			if effectiveID != brokerID {
+				log.Printf("Broker ID updated from %s to %s (name-based dedup)", brokerID, effectiveID)
+				brokerID = effectiveID
+				if err := config.UpdateSetting(globalDir, "hub.brokerId", brokerID, true); err != nil {
+					log.Printf("Warning: failed to persist deduplicated broker ID: %v", err)
+				}
+			}
+			log.Printf("Registered global grove with runtime broker %s (endpoint: %s, autoProvide: %v)", brokerName, rhEndpoint, serverAutoProvide)
+			hubSrv.SetEmbeddedBrokerID(brokerID)
+		}
+
+		// Generate credentials for co-located mode
+		secretKeyBytes := make([]byte, 32)
+		if _, err := rand.Read(secretKeyBytes); err != nil {
+			log.Printf("Warning: failed to generate secret key for co-located mode: %v", err)
+		} else {
+			brokerSecret := &store.BrokerSecret{
+				BrokerID:  brokerID,
+				SecretKey: secretKeyBytes,
+				Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
+				CreatedAt: time.Now(),
+				Status:    store.BrokerSecretStatusActive,
+			}
+			if err := s.DeleteBrokerSecret(ctx, brokerID); err != nil && err != store.ErrNotFound {
+				log.Printf("Warning: failed to delete old broker secret: %v", err)
+			}
+			if err := s.CreateBrokerSecret(ctx, brokerSecret); err != nil {
+				log.Printf("Warning: failed to create broker secret for co-located mode: %v", err)
+			} else {
+				log.Printf("Created broker secret for co-located control channel")
+			}
+
+			inMemoryCreds = &brokercredentials.BrokerCredentials{
+				BrokerID:     brokerID,
+				SecretKey:    base64.StdEncoding.EncodeToString(secretKeyBytes),
+				HubEndpoint:  hubEndpointForRH,
+				RegisteredAt: time.Now(),
+			}
+		}
+	}
+
+	// Auto-compute ContainerHubEndpoint
+	containerHubEndpoint := cfg.RuntimeBroker.ContainerHubEndpoint
+	if containerHubEndpoint == "" && enableHub && hubEndpointForRH != "" && rt != nil {
+		if computed := containerBridgeEndpoint(hubEndpointForRH, rt.Name()); computed != "" {
+			containerHubEndpoint = computed
+			log.Printf("Auto-computed ContainerHubEndpoint for %s runtime: %s", rt.Name(), containerHubEndpoint)
+		}
+	}
+
+	// Create Runtime Broker server configuration
+	rhCfg := runtimebroker.ServerConfig{
+		Port:                 cfg.RuntimeBroker.Port,
+		Host:                 cfg.RuntimeBroker.Host,
+		ReadTimeout:          cfg.RuntimeBroker.ReadTimeout,
+		WriteTimeout:         cfg.RuntimeBroker.WriteTimeout,
+		HubEndpoint:          hubEndpointForRH,
+		ContainerHubEndpoint: containerHubEndpoint,
+		BrokerID:             brokerID,
+		BrokerName:           brokerName,
+		CORSEnabled:          cfg.RuntimeBroker.CORSEnabled,
+		CORSAllowedOrigins:   cfg.RuntimeBroker.CORSAllowedOrigins,
+		CORSAllowedMethods:   cfg.RuntimeBroker.CORSAllowedMethods,
+		CORSAllowedHeaders:   cfg.RuntimeBroker.CORSAllowedHeaders,
+		CORSMaxAge:           cfg.RuntimeBroker.CORSMaxAge,
+		Debug:                enableDebug,
+
+		HubEnabled:           hubEndpointForRH != "",
+		HubToken:             devAuthToken,
+		TemplateCacheDir:     templateCacheDir,
+		TemplateCacheMaxSize: templateCacheMax,
+
+		ControlChannelEnabled: hubEndpointForRH != "",
+		HeartbeatEnabled:      hubEndpointForRH != "",
+
+		InMemoryCredentials:  inMemoryCreds,
+		BrokerAuthEnabled:    true,
+		BrokerAuthStrictMode: true,
+	}
+
+	rhSrv := runtimebroker.New(rhCfg, mgr, rt)
+	rhSrv.SetRequestLogger(requestLogger)
+	if messageLogger != nil {
+		rhSrv.SetMessageLogger(messageLogger)
+	}
+
+	if webSrv != nil {
+		webSrv.SetBrokerHealthProvider(func(ctx context.Context) interface{} {
+			return rhSrv.GetHealthInfo(ctx)
+		})
+	}
+
+	log.Printf("Starting Runtime Broker API server on %s:%d",
+		cfg.RuntimeBroker.Host, cfg.RuntimeBroker.Port)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := rhSrv.Start(ctx); err != nil {
+			errCh <- fmt.Errorf("runtime broker server error: %w", err)
+		}
+	}()
+
+	// Start internal heartbeat loop for co-located operation
+	if colocatedBrokerRegistered {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := s.UpdateRuntimeBrokerHeartbeat(ctx, brokerID, store.BrokerStatusOnline); err != nil {
+						log.Printf("Warning: failed to update internal heartbeat for %s: %v", brokerName, err)
+					}
+				}
+			}
+		}()
+	} else if simulateRemoteBroker && enableHub && cfg.RuntimeBroker.Enabled {
+		log.Printf("Simulating remote broker: skipping automatic global grove registration")
+	}
+
+	return nil
+}
+
+// resolveBrokerID determines the broker ID from various sources.
+func resolveBrokerID(cfg *config.GlobalConfig, settings *config.Settings, vsBroker *config.V1BrokerConfig, globalDir string) string {
+	var brokerID string
+	if vsBroker != nil && vsBroker.BrokerID != "" {
+		brokerID = vsBroker.BrokerID
+	} else {
+		brokerID = settings.Hub.BrokerID
+	}
+	if brokerID == "" {
+		brokerID = cfg.RuntimeBroker.BrokerID
+	}
+	if brokerID == "" {
+		brokerID = api.NewUUID()
+		if err := config.UpdateSetting(globalDir, "hub.brokerId", brokerID, true); err != nil {
+			log.Printf("Warning: failed to persist broker ID to settings: %v", err)
+		} else {
+			log.Printf("Generated and persisted new broker ID: %s", brokerID)
+		}
+	}
+	return brokerID
+}
+
+// resolveBrokerName determines the broker name from various sources.
+func resolveBrokerName(cfg *config.GlobalConfig, settings *config.Settings, vsBroker *config.V1BrokerConfig) string {
+	var brokerName string
+	if vsBroker != nil && vsBroker.BrokerNickname != "" {
+		brokerName = vsBroker.BrokerNickname
+	} else if vsBroker != nil && vsBroker.BrokerName != "" {
+		brokerName = vsBroker.BrokerName
+	} else {
+		brokerName = settings.Hub.BrokerNickname
+	}
+	if brokerName == "" {
+		brokerName = cfg.RuntimeBroker.BrokerName
+	}
+	if brokerName == "" {
+		if hostname, err := os.Hostname(); err == nil {
+			brokerName = hostname
+		} else {
+			brokerName = "runtime-broker"
+		}
+	}
+	return brokerName
+}
+
+// resolveHubEndpointForBroker determines the Hub endpoint URL for the runtime broker.
+func resolveHubEndpointForBroker(cfg *config.GlobalConfig, hubEndpoint string, settings *config.Settings) string {
+	hubEndpointForRH := cfg.RuntimeBroker.HubEndpoint
+	if hubEndpointForRH == "" && enableHub {
+		if hubEndpoint != "" && !isLocalhostURL(hubEndpoint) {
+			hubEndpointForRH = hubEndpoint
+			if enableDebug {
+				log.Printf("Co-located Hub: using public endpoint %s for broker and agents", hubEndpointForRH)
+			}
+		} else {
+			port := cfg.Hub.Port
+			if enableWeb {
+				port = webPort
+			}
+			hubEndpointForRH = fmt.Sprintf("http://localhost:%d", port)
+			if enableDebug {
+				log.Printf("Co-located Hub detected: using %s for heartbeat and template hydration", hubEndpointForRH)
+			}
+		}
+	} else if hubEndpointForRH == "" && settings.Hub != nil {
+		hubEndpointForRH = settings.Hub.Endpoint
+	}
+	return hubEndpointForRH
+}
