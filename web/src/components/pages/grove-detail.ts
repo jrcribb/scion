@@ -32,6 +32,7 @@ import type { ViewMode } from '../shared/view-toggle.js';
 import '../shared/status-badge.js';
 import '../shared/view-toggle.js';
 import '../shared/scheduled-event-list.js';
+import '../shared/subscription-manager.js';
 
 @customElement('scion-page-grove-detail')
 export class ScionPageGroveDetail extends LitElement {
@@ -1158,6 +1159,15 @@ export class ScionPageGroveDetail extends LitElement {
         .groveId=${this.grove.id}
         compact
       ></scion-scheduled-event-list>
+
+      ${this.pageData?.user
+        ? html`
+            <scion-subscription-manager
+              .groveId=${this.grove.id}
+              compact
+            ></scion-subscription-manager>
+          `
+        : nothing}
 
       <div class="section-header">
         <h2>Agents</h2>

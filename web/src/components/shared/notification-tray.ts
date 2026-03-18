@@ -519,6 +519,48 @@ export class ScionNotificationTray extends LitElement {
       color: var(--scion-primary, #3b82f6);
     }
 
+    .scope-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.125rem;
+      font-size: 0.625rem;
+      font-weight: 500;
+      padding: 0.0625rem 0.3125rem;
+      border-radius: 9999px;
+      background: var(--scion-bg-subtle, #f1f5f9);
+      color: var(--scion-text-muted, #64748b);
+      vertical-align: middle;
+    }
+
+    .scope-indicator sl-icon {
+      font-size: 0.5625rem;
+    }
+
+    .panel-footer {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.5rem 1rem;
+      border-top: 1px solid var(--scion-border, #e2e8f0);
+    }
+
+    .manage-link {
+      border: none;
+      background: transparent;
+      color: var(--scion-primary, #3b82f6);
+      font-size: 0.75rem;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 0.25rem 0.5rem;
+      border-radius: 0.25rem;
+      text-decoration: none;
+      transition: background 0.15s ease;
+    }
+
+    .manage-link:hover {
+      background: var(--scion-bg-subtle, #f1f5f9);
+    }
+
     /* Empty state */
     .empty-state {
       display: flex;
@@ -594,6 +636,19 @@ export class ScionNotificationTray extends LitElement {
           ${count > 0
             ? this.notifications.map((n) => this.renderItem(n))
             : this.renderEmpty()}
+        </div>
+        <div class="panel-footer">
+          <a
+            href="/groves"
+            class="manage-link"
+            @click=${(e: Event): void => {
+              e.preventDefault();
+              this.open = false;
+              document.removeEventListener('click', this.boundOnClickOutside, true);
+              window.history.pushState({}, '', '/groves');
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }}
+          >Manage subscriptions</a>
         </div>
       </div>
     `;

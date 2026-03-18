@@ -536,6 +536,31 @@ export interface Notification {
 }
 
 // ---------------------------------------------------------------------------
+// Notification Subscriptions
+// ---------------------------------------------------------------------------
+
+/**
+ * Subscription scope — watch a single agent or an entire grove.
+ */
+export type SubscriptionScope = 'agent' | 'grove';
+
+/**
+ * Notification subscription from the Hub API
+ * (GET /api/v1/notifications/subscriptions)
+ */
+export interface Subscription {
+  id: string;
+  scope: SubscriptionScope;
+  agentId?: string;
+  subscriberType: string;
+  subscriberId: string;
+  groveId: string;
+  triggerActivities: string[];
+  createdAt: string;
+  createdBy: string;
+}
+
+// ---------------------------------------------------------------------------
 // Access control capabilities
 // ---------------------------------------------------------------------------
 

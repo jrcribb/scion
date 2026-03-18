@@ -36,3 +36,4 @@ export { ScionJsonBrowser } from './json-browser.js';
 export { ScionAgentLogViewer } from './agent-log-viewer.js';
 export { ScionSharedDirList } from './shared-dir-list.js';
 export { ScionGCPServiceAccountList } from './gcp-service-account-list.js';
+export { ScionSubscriptionManager } from './subscription-manager.js';

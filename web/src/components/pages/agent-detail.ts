@@ -33,6 +33,7 @@ import type {
   GCPIdentityConfig,
   Grove,
   Notification,
+  Subscription,
 } from '../../shared/types.js';
 import {
   can,
@@ -123,6 +124,15 @@ export class ScionPageAgentDetail extends LitElement {
 
   @state()
   private agentNotifications: Notification[] = [];
+
+  @state()
+  private subscribed = false;
+
+  @state()
+  private subscriptionId: string | null = null;
+
+  @state()
+  private subscriptionLoading = false;
 
   static override styles = css`
     :host {
@@ -543,6 +553,33 @@ export class ScionPageAgentDetail extends LitElement {
       background: var(--scion-bg-subtle, #f1f5f9);
       color: var(--scion-text-muted, #64748b);
     }
+
+    /* ---- Subscribe bell ---- */
+    .subscribe-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.25rem;
+      height: 2.25rem;
+      border: 1px solid var(--scion-border, #e2e8f0);
+      border-radius: var(--scion-radius, 0.5rem);
+      background: transparent;
+      color: var(--scion-text-muted, #64748b);
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .subscribe-btn:hover {
+      background: var(--scion-bg-subtle, #f1f5f9);
+      color: var(--scion-text, #1e293b);
+    }
+    .subscribe-btn.active {
+      background: var(--sl-color-primary-100, #dbeafe);
+      color: var(--scion-primary, #3b82f6);
+      border-color: var(--scion-primary, #3b82f6);
+    }
+    .subscribe-btn sl-icon {
+      font-size: 1.125rem;
+    }
   `;
 
   private boundOnAgentsUpdated = this.onAgentsUpdated.bind(this);
@@ -651,6 +688,25 @@ export class ScionPageAgentDetail extends LitElement {
             })
             .catch(() => {
               // Notification loading is optional
+            })
+        );
+
+        // Check if user has a subscription for this agent
+        parallel.push(
+          apiFetch(`/api/v1/notifications/subscriptions?agentId=${this.agentId}`)
+            .then(async (subRes) => {
+              if (subRes.ok) {
+                const data = (await subRes.json()) as Subscription[] | { subscriptions?: Subscription[] };
+                const subs = Array.isArray(data) ? data : (data as { subscriptions?: Subscription[] }).subscriptions || [];
+                const match = subs.find((s) => s.scope === 'agent' && s.agentId === this.agentId);
+                if (match) {
+                  this.subscribed = true;
+                  this.subscriptionId = match.id;
+                }
+              }
+            })
+            .catch(() => {
+              // Subscription check is optional
             })
         );
       }
@@ -783,6 +839,44 @@ export class ScionPageAgentDetail extends LitElement {
       alert(err instanceof Error ? err.message : `Failed to ${action} agent`);
       // Roll back optimistic update
       this.backgroundRefresh();
+    }
+  }
+
+  private async toggleSubscription(): Promise<void> {
+    if (!this.agent) return;
+    this.subscriptionLoading = true;
+
+    try {
+      if (this.subscribed && this.subscriptionId) {
+        const res = await apiFetch(
+          `/api/v1/notifications/subscriptions/${encodeURIComponent(this.subscriptionId)}`,
+          { method: 'DELETE' }
+        );
+        if (res.ok || res.status === 204) {
+          this.subscribed = false;
+          this.subscriptionId = null;
+        }
+      } else {
+        const res = await apiFetch('/api/v1/notifications/subscriptions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scope: 'agent',
+            agentId: this.agentId,
+            groveId: this.agent.groveId,
+            triggerActivities: ['COMPLETED', 'WAITING_FOR_INPUT', 'LIMITS_EXCEEDED'],
+          }),
+        });
+        if (res.ok) {
+          const sub = (await res.json()) as Subscription;
+          this.subscribed = true;
+          this.subscriptionId = sub.id;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to toggle subscription:', err);
+    } finally {
+      this.subscriptionLoading = false;
     }
   }
 
@@ -928,6 +1022,20 @@ export class ScionPageAgentDetail extends LitElement {
           </div>
         </div>
         <div class="header-actions">
+          ${this.pageData?.user
+            ? html`
+                <sl-tooltip content=${this.subscribed ? 'Unsubscribe from notifications' : 'Subscribe to notifications'}>
+                  <button
+                    class="subscribe-btn ${this.subscribed ? 'active' : ''}"
+                    @click=${() => void this.toggleSubscription()}
+                    ?disabled=${this.subscriptionLoading}
+                    aria-label=${this.subscribed ? 'Unsubscribe' : 'Subscribe'}
+                  >
+                    <sl-icon name=${this.subscribed ? 'bell-fill' : 'bell'}></sl-icon>
+                  </button>
+                </sl-tooltip>
+              `
+            : nothing}
           ${can(agent._capabilities, 'attach')
             ? html`
                 <a href="/agents/${this.agentId}/terminal" style="text-decoration: none;">
