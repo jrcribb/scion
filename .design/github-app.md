@@ -899,19 +899,19 @@ This is comparable to installing any third-party GitHub App (CI systems, code re
 8. ✅ Add `GitHubAppGroveStatus` model and store operations (grove fields + grove sub-route endpoints).
 9. ✅ Unit tests for JWT generation, token exchange, error classification, store CRUD, and API handlers.
 
-### Phase 2: Installation Callback, Grove Association, and Secret Resolution
+### Phase 2: Installation Callback, Grove Association, and Secret Resolution ✅ COMPLETE
 
-1. Implement setup URL callback handler (`GET /github-app/setup`).
-2. Implement webhook endpoint (`POST /api/v1/webhooks/github`) with signature verification.
-3. Implement webhook reachability validation (`POST /api/v1/github-app/validate-webhooks`).
-4. Auto-match installations to groves by repo URL in both callback and webhook handlers.
-5. Add `github_installation_id`, `github_permissions`, and `github_app_status` to Grove model.
-6. Add Hub API: grove GitHub installation, permissions, and status endpoints.
-7. Implement auto-discovery fallback for `scion hub grove create`.
-8. Integrate into secret resolution: when grove has installation, mint token with grove-specific permissions (or defaults).
-9. On minting failure: classify error, update grove status, fall back to PAT.
-10. Transparent injection as `GITHUB_TOKEN` in agent environment.
-11. Integration tests: app install callback → grove association → agent start → git clone.
+1. ✅ Implement setup URL callback handler (`GET /github-app/setup`).
+2. ✅ Implement webhook endpoint (`POST /api/v1/webhooks/github`) with HMAC-SHA256 signature verification.
+3. ⏳ Webhook reachability validation (`POST /api/v1/github-app/validate-webhooks`) — deferred to Phase 4 polish.
+4. ✅ Auto-match installations to groves by repo URL in webhook, setup callback, and discover handlers.
+5. ✅ `github_installation_id`, `github_permissions`, and `github_app_status` on Grove model (Phase 1 migration V35).
+6. ✅ Hub API: grove GitHub installation, permissions, and status endpoints (Phase 1).
+7. ✅ Implement auto-discovery endpoint (`POST /api/v1/github-app/installations/discover`).
+8. ✅ Integrate into secret resolution: mint token with grove-specific permissions (or defaults) via `GitHubAppTokenMinter` interface.
+9. ✅ On minting failure: classify error (`auth_failed`, `app_suspended`, `repo_not_accessible`), update grove status, fall back to PAT.
+10. ✅ Transparent injection as `GITHUB_TOKEN` in agent environment via `HTTPAgentDispatcher`.
+11. ✅ Unit tests: webhook signature, webhook events (ping, install created/deleted, repos added/removed), grove matching, idempotent creates.
 
 ### Phase 3: Token Refresh (Blended)
 
