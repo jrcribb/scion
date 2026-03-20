@@ -266,7 +266,9 @@ func (s *Server) persistGitHubAppConfig(cfg GitHubAppServerConfig) error {
 		raw = make(map[string]interface{})
 	}
 
-	// Build the github_app section with only non-sensitive fields
+	// Build the github_app section with only non-sensitive fields.
+	// This must be nested under "server" to match the V1ServerConfig schema
+	// that loadServerFromSettingsFile expects.
 	ghApp := map[string]interface{}{}
 	if cfg.AppID != 0 {
 		ghApp["app_id"] = cfg.AppID
@@ -284,8 +286,16 @@ func (s *Server) persistGitHubAppConfig(cfg GitHubAppServerConfig) error {
 	}
 
 	if len(ghApp) > 0 {
-		raw["github_app"] = ghApp
+		serverRaw, _ := raw["server"].(map[string]interface{})
+		if serverRaw == nil {
+			serverRaw = make(map[string]interface{})
+		}
+		serverRaw["github_app"] = ghApp
+		raw["server"] = serverRaw
 	}
+
+	// Clean up any stale top-level github_app key from older versions
+	delete(raw, "github_app")
 
 	// Ensure schema_version is set
 	if _, ok := raw["schema_version"]; !ok {

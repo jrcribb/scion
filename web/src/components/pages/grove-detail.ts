@@ -742,8 +742,8 @@ export class ScionPageGroveDetail extends LitElement {
         void this.loadWorkspaceFiles();
       }
 
-      // Auto-discover GitHub App installation if grove has a git remote but no installation
-      if (this.grove && this.grove.gitRemote && this.grove.githubInstallationId == null) {
+      // Auto-discover GitHub App installation if grove has a GitHub remote but no installation
+      if (this.grove && this.grove.gitRemote && /github\.com[/:]/.test(this.grove.gitRemote) && this.grove.githubInstallationId == null) {
         void this.autoDiscoverGitHubApp();
       }
     } catch (err) {

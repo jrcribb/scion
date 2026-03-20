@@ -1766,9 +1766,9 @@ export class ScionPageAdminServerConfig extends LitElement {
             <label>App ID</label>
             <span class="hint">The numeric ID of your registered GitHub App</span>
             <sl-input
-              type="number"
               .value=${this.githubAppId ? String(this.githubAppId) : ''}
               placeholder="e.g. 123456"
+              inputmode="numeric"
               @sl-input=${(e: Event) => {
                 this.githubAppId = parseInt((e.target as HTMLInputElement).value) || 0;
               }}

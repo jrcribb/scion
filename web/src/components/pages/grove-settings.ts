@@ -656,6 +656,7 @@ export class ScionPageGroveSettings extends LitElement {
   }
 
   private async checkGitHubAppConfigured(): Promise<void> {
+    this.githubAppLoading = true;
     try {
       const res = await apiFetch('/api/v1/github-app');
       if (res.ok) {
@@ -665,11 +666,14 @@ export class ScionPageGroveSettings extends LitElement {
 
         // Auto-discover if configured and grove has no installation yet
         if (data.configured && this.githubAppInstallationId == null && this.grove?.gitRemote) {
-          void this.discoverGitHubInstallation();
+          await this.discoverGitHubInstallation();
+          return; // discoverGitHubInstallation handles githubAppLoading
         }
       }
     } catch {
       // Non-critical — just don't show the section
+    } finally {
+      this.githubAppLoading = false;
     }
   }
 
@@ -1065,9 +1069,14 @@ export class ScionPageGroveSettings extends LitElement {
     `;
   }
 
+  private isGitHubRemote(): boolean {
+    const remote = this.grove?.gitRemote || '';
+    return /github\.com[/:]/.test(remote);
+  }
+
   private renderGitHubAppSection() {
     if (!this.grove?.gitRemote) return '';
-    if (!this.githubAppConfigured) return '';
+    if (!this.isGitHubRemote()) return '';
 
     const status = this.githubAppStatus;
     const hasInstallation = this.githubAppInstallationId != null;
@@ -1104,20 +1113,27 @@ export class ScionPageGroveSettings extends LitElement {
         ${!hasInstallation ? html`
           <div class="github-no-install">
             <sl-icon name="github" style="font-size: 2rem; color: var(--scion-text-muted, #64748b);"></sl-icon>
-            <p>No GitHub App installation found for this grove's repository.</p>
-            ${this.githubAppInstallationUrl ? html`
-              <p class="field-help">
-                <a href=${this.githubAppInstallationUrl} target="_blank" rel="noopener noreferrer">
-                  Install the GitHub App
-                </a> on your organization or account, then click Discover.
-              </p>
+            ${this.githubAppLoading ? html`
+              <p>Checking for GitHub App installation…</p>
+            ` : !this.githubAppConfigured ? html`
+              <p>No GitHub App has been configured on this Hub.</p>
+              <p class="field-help">Ask your Hub admin to configure the GitHub App integration, then install it on your organization or account.</p>
             ` : html`
-              <p class="field-help">Ask your Hub admin to configure the GitHub App, then install it on your organization or account.</p>
+              <p>No GitHub App installation found for this grove's repository.</p>
+              ${this.githubAppInstallationUrl ? html`
+                <p class="field-help">
+                  <a href=${this.githubAppInstallationUrl} target="_blank" rel="noopener noreferrer">
+                    Install the GitHub App
+                  </a> on your organization or account, then click Discover.
+                </p>
+              ` : html`
+                <p class="field-help">Install the GitHub App on your organization or account, then click Discover.</p>
+              `}
+              <sl-button variant="default" size="small" @click=${() => this.discoverGitHubInstallation()}>
+                <sl-icon slot="prefix" name="search"></sl-icon>
+                Discover Installation
+              </sl-button>
             `}
-            <sl-button variant="default" size="small" @click=${() => this.discoverGitHubInstallation()}>
-              <sl-icon slot="prefix" name="search"></sl-icon>
-              Discover Installation
-            </sl-button>
           </div>
         ` : html`
           <div class="github-status-row">
@@ -1196,6 +1212,7 @@ export class ScionPageGroveSettings extends LitElement {
 
   private async checkGitHubStatus(): Promise<void> {
     this.githubAppError = null;
+    this.githubAppLoading = true;
     try {
       // Trigger a discover to refresh installation state from GitHub
       const res = await apiFetch('/api/v1/github-app/installations/discover', { method: 'POST' });
@@ -1203,9 +1220,11 @@ export class ScionPageGroveSettings extends LitElement {
         const data = (await res.json().catch(() => ({}))) as { message?: string };
         throw new Error(data.message || `Check failed (${res.status})`);
       }
-      await this.loadGrove(true);
+      await this.refreshGitHubAppState();
     } catch (err) {
       this.githubAppError = err instanceof Error ? err.message : 'Check failed';
+    } finally {
+      this.githubAppLoading = false;
     }
   }
 
@@ -1218,12 +1237,26 @@ export class ScionPageGroveSettings extends LitElement {
         const data = (await res.json().catch(() => ({}))) as { message?: string };
         throw new Error(data.message || `Failed to discover installations (${res.status})`);
       }
-      // Reload grove to pick up any auto-association (skip GitHub check to prevent loop)
-      await this.loadGrove(true);
+      // Refresh just the grove's GitHub App state without a full reload
+      await this.refreshGitHubAppState();
     } catch (err) {
       this.githubAppError = err instanceof Error ? err.message : 'Discovery failed';
     } finally {
       this.githubAppLoading = false;
+    }
+  }
+
+  private async refreshGitHubAppState(): Promise<void> {
+    const res = await apiFetch(`/api/v1/groves/${this.groveId}`);
+    if (res.ok) {
+      const grove = (await res.json()) as Grove;
+      this.githubAppInstallationId = grove.githubInstallationId ?? null;
+      this.githubAppStatus = grove.githubAppStatus ?? null;
+      this.githubAppPermissions = grove.githubPermissions ?? null;
+      // Update the grove object in place so renderGroveIcon and other parts reflect the change
+      if (this.grove) {
+        this.grove = { ...this.grove, githubInstallationId: grove.githubInstallationId, githubAppStatus: grove.githubAppStatus, githubPermissions: grove.githubPermissions };
+      }
     }
   }
 
@@ -1240,8 +1273,9 @@ export class ScionPageGroveSettings extends LitElement {
       this.githubAppInstallationId = null;
       this.githubAppStatus = null;
       this.githubAppPermissions = null;
-      // Reload grove (skip GitHub check to prevent loop)
-      await this.loadGrove(true);
+      if (this.grove) {
+        this.grove = { ...this.grove, githubInstallationId: undefined, githubAppStatus: undefined, githubPermissions: undefined };
+      }
     } catch (err) {
       this.githubAppError = err instanceof Error ? err.message : 'Remove failed';
     } finally {
