@@ -1426,7 +1426,7 @@ export class ScionPageGroveSettings extends LitElement {
       return html`
         <div class="section">
           <h2>Configuration</h2>
-          <p>Grove-level defaults for agent creation.</p>
+          <p>Grove configuration and agent defaults.</p>
           <div style="text-align: center; padding: 1rem;"><sl-spinner></sl-spinner></div>
         </div>
       `;
@@ -1435,7 +1435,7 @@ export class ScionPageGroveSettings extends LitElement {
     return html`
       <div class="section">
         <h2>Configuration</h2>
-        <p>Grove-level defaults for agent creation.</p>
+        <p>Grove configuration and agent defaults.</p>
 
         <sl-tab-group
           @sl-tab-show=${(e: CustomEvent) => {
@@ -1450,6 +1450,9 @@ export class ScionPageGroveSettings extends LitElement {
           >
           <sl-tab slot="nav" panel="resources" ?active=${this.activeConfigTab === 'resources'}
             >Resources</sl-tab
+          >
+          <sl-tab slot="nav" panel="brokers" ?active=${this.activeConfigTab === 'brokers'}
+            >Runtime Brokers</sl-tab
           >
 
           <sl-tab-panel name="general">
@@ -1650,6 +1653,10 @@ export class ScionPageGroveSettings extends LitElement {
               </div>
             </div>
           </sl-tab-panel>
+
+          <sl-tab-panel name="brokers">
+            ${this.renderBrokersContent()}
+          </sl-tab-panel>
         </sl-tab-group>
 
         ${canEdit
@@ -1696,7 +1703,6 @@ export class ScionPageGroveSettings extends LitElement {
           <sl-tab slot="nav" panel="shared-dirs" ?active=${this.activeResourcesTab === 'shared-dirs'}>Shared Directories</sl-tab>
           <sl-tab slot="nav" panel="templates" ?active=${this.activeResourcesTab === 'templates'}>Templates</sl-tab>
           <sl-tab slot="nav" panel="gcp-sa" ?active=${this.activeResourcesTab === 'gcp-sa'}>GCP Service Accounts</sl-tab>
-          <sl-tab slot="nav" panel="brokers" ?active=${this.activeResourcesTab === 'brokers'}>Runtime Brokers</sl-tab>
 
           <sl-tab-panel name="env-vars">
             <scion-env-var-list
@@ -1729,10 +1735,6 @@ export class ScionPageGroveSettings extends LitElement {
             <scion-gcp-service-account-list
               groveId=${this.groveId}
             ></scion-gcp-service-account-list>
-          </sl-tab-panel>
-
-          <sl-tab-panel name="brokers">
-            ${this.renderBrokersContent()}
           </sl-tab-panel>
         </sl-tab-group>
       </div>
@@ -1883,7 +1885,10 @@ export class ScionPageGroveSettings extends LitElement {
       if (!response.ok) {
         throw new Error(await extractApiError(response, 'Failed to set default broker'));
       }
-      this.grove = (await response.json()) as Grove;
+      const updated = (await response.json()) as Grove;
+      // Preserve _capabilities from the current grove since PATCH responses may omit them
+      const caps = this.grove?._capabilities || updated._capabilities;
+      this.grove = caps ? { ...updated, _capabilities: caps } : updated;
     } catch (err) {
       console.error('Failed to set default broker:', err);
     }
