@@ -67,7 +67,9 @@ func waitForTmuxSession(ctx context.Context, runtimeCmd, containerID, namespace 
 		case <-ticker.C:
 			var checkErr error
 			if isK8s && k8sConfig != nil && k8sClientset != nil {
-				checkErr = k8sExecCheck(ctx, k8sConfig, k8sClientset, namespace, containerID, []string{"tmux", "has-session", "-t", "scion"})
+				// The tmux session runs as the scion user (via sciontool init privilege drop),
+				// so we must check as that user — root can't see scion's tmux socket.
+				checkErr = k8sExecCheck(ctx, k8sConfig, k8sClientset, namespace, containerID, []string{"su", "-", "scion", "-c", "tmux has-session -t scion"})
 			} else {
 				cmd := exec.CommandContext(ctx, runtimeCmd, "exec", "--user", "scion", containerID, "tmux", "has-session", "-t", "scion")
 				checkErr = cmd.Run()
