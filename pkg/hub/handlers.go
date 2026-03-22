@@ -7162,6 +7162,39 @@ func (s *Server) populateAgentConfig(agent *store.Agent, grove *store.Grove, res
 			}
 		}
 	}
+
+	// Merge hub-level telemetry config as lowest-priority default.
+	// Only applies when no per-agent or template telemetry config is set.
+	s.mu.RLock()
+	hubTelemetry := s.config.TelemetryConfig
+	s.mu.RUnlock()
+	if hubTelemetry != nil {
+		if agent.AppliedConfig.InlineConfig == nil {
+			agent.AppliedConfig.InlineConfig = &api.ScionConfig{}
+		}
+		if agent.AppliedConfig.InlineConfig.Telemetry == nil {
+			// Deep copy to avoid sharing the pointer with the server config.
+			copied := *hubTelemetry
+			agent.AppliedConfig.InlineConfig.Telemetry = &copied
+		}
+	}
+
+	// Apply grove-level TelemetryEnabled override. This takes effect regardless
+	// of where the telemetry config came from (inline, template, or hub), so
+	// grove admins can enable/disable telemetry for all agents in the grove.
+	if grove != nil && grove.Annotations != nil {
+		if val, ok := grove.Annotations[groveSettingTelemetryEnabled]; ok {
+			if b, err := strconv.ParseBool(val); err == nil {
+				if agent.AppliedConfig.InlineConfig == nil {
+					agent.AppliedConfig.InlineConfig = &api.ScionConfig{}
+				}
+				if agent.AppliedConfig.InlineConfig.Telemetry == nil {
+					agent.AppliedConfig.InlineConfig.Telemetry = &api.TelemetryConfig{}
+				}
+				agent.AppliedConfig.InlineConfig.Telemetry.Enabled = &b
+			}
+		}
+	}
 }
 
 // existingAgentResult describes the outcome of handleExistingAgent.

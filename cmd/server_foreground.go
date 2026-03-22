@@ -624,6 +624,7 @@ func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store,
 		AdminMode:             adminMode,
 		MaintenanceMessage:    maintenanceMessage,
 		TelemetryDefault:      cfg.TelemetryEnabled,
+		TelemetryConfig:       config.ConvertV1TelemetryToAPI(cfg.TelemetryConfig),
 		BrokerAuthConfig:      hub.DefaultBrokerAuthConfig(),
 		GitHubAppConfig: hub.GitHubAppServerConfig{
 			AppID:           cfg.GitHubApp.AppID,

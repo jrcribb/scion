@@ -229,7 +229,7 @@ func (s *Server) reloadSettings() map[string]interface{} {
 	applied := []string{}
 	needsRestart := []string{}
 
-	// Reload telemetry default
+	// Reload telemetry default and full config
 	s.mu.Lock()
 	if gc.TelemetryEnabled != nil {
 		oldVal := s.config.TelemetryDefault
@@ -237,6 +237,10 @@ func (s *Server) reloadSettings() map[string]interface{} {
 		if oldVal == nil || *oldVal != *gc.TelemetryEnabled {
 			applied = append(applied, "telemetry_default")
 		}
+	}
+	if gc.TelemetryConfig != nil {
+		s.config.TelemetryConfig = config.ConvertV1TelemetryToAPI(gc.TelemetryConfig)
+		applied = append(applied, "telemetry_config")
 	}
 
 	// Reload admin emails

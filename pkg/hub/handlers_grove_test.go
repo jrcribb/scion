@@ -265,6 +265,146 @@ func TestPopulateAgentConfig_InlineTelemetryNotOverwritten(t *testing.T) {
 		"Explicit inline telemetry should take precedence over template")
 }
 
+func TestPopulateAgentConfig_HubTelemetryDefault(t *testing.T) {
+	srv, _ := testServer(t)
+
+	// Set hub-level telemetry config
+	hubEnabled := true
+	srv.config.TelemetryConfig = &api.TelemetryConfig{
+		Enabled: &hubEnabled,
+		Cloud: &api.TelemetryCloudConfig{
+			Endpoint: "https://hub-otel.example.com",
+			Provider: "gcp",
+		},
+	}
+
+	grove := &store.Grove{
+		ID:   "grove-hub-tel",
+		Name: "Hub Telemetry Grove",
+		Slug: "hub-telemetry-grove",
+	}
+
+	agent := &store.Agent{
+		ID:            "agent-hub-tel",
+		AppliedConfig: &store.AgentAppliedConfig{},
+	}
+
+	srv.populateAgentConfig(agent, grove, nil)
+
+	require.NotNil(t, agent.AppliedConfig.InlineConfig,
+		"InlineConfig should be created to hold hub telemetry")
+	require.NotNil(t, agent.AppliedConfig.InlineConfig.Telemetry,
+		"Telemetry should be populated from hub config")
+	assert.Equal(t, &hubEnabled, agent.AppliedConfig.InlineConfig.Telemetry.Enabled)
+	assert.Equal(t, "https://hub-otel.example.com",
+		agent.AppliedConfig.InlineConfig.Telemetry.Cloud.Endpoint)
+}
+
+func TestPopulateAgentConfig_HubTelemetryNotOverwrittenByTemplate(t *testing.T) {
+	srv, _ := testServer(t)
+
+	// Set hub-level telemetry config
+	hubEnabled := true
+	srv.config.TelemetryConfig = &api.TelemetryConfig{
+		Enabled: &hubEnabled,
+		Cloud: &api.TelemetryCloudConfig{
+			Endpoint: "https://hub-otel.example.com",
+		},
+	}
+
+	tmplEnabled := true
+	template := &store.Template{
+		ID:   "tmpl-hub-tel",
+		Slug: "hub-tel-template",
+		Config: &store.TemplateConfig{
+			Telemetry: &api.TelemetryConfig{
+				Enabled: &tmplEnabled,
+				Cloud: &api.TelemetryCloudConfig{
+					Endpoint: "https://template-otel.example.com",
+				},
+			},
+		},
+	}
+
+	grove := &store.Grove{ID: "grove-hub-tel2", Slug: "hub-tel-grove-2"}
+
+	agent := &store.Agent{
+		ID:            "agent-hub-tel2",
+		AppliedConfig: &store.AgentAppliedConfig{},
+	}
+
+	srv.populateAgentConfig(agent, grove, template)
+
+	// Template telemetry should win over hub telemetry
+	assert.Equal(t, "https://template-otel.example.com",
+		agent.AppliedConfig.InlineConfig.Telemetry.Cloud.Endpoint,
+		"Template telemetry should take precedence over hub default")
+}
+
+func TestPopulateAgentConfig_GroveTelemetryEnabledOverride(t *testing.T) {
+	srv, _ := testServer(t)
+
+	// Set hub-level telemetry config with enabled=true
+	hubEnabled := true
+	srv.config.TelemetryConfig = &api.TelemetryConfig{
+		Enabled: &hubEnabled,
+		Cloud: &api.TelemetryCloudConfig{
+			Endpoint: "https://hub-otel.example.com",
+		},
+	}
+
+	// Grove disables telemetry
+	grove := &store.Grove{
+		ID:   "grove-tel-override",
+		Slug: "tel-override-grove",
+		Annotations: map[string]string{
+			groveSettingTelemetryEnabled: "false",
+		},
+	}
+
+	agent := &store.Agent{
+		ID:            "agent-tel-override",
+		AppliedConfig: &store.AgentAppliedConfig{},
+	}
+
+	srv.populateAgentConfig(agent, grove, nil)
+
+	require.NotNil(t, agent.AppliedConfig.InlineConfig.Telemetry)
+	// Hub cloud config should still be present
+	assert.Equal(t, "https://hub-otel.example.com",
+		agent.AppliedConfig.InlineConfig.Telemetry.Cloud.Endpoint)
+	// But enabled should be overridden by grove setting
+	require.NotNil(t, agent.AppliedConfig.InlineConfig.Telemetry.Enabled)
+	assert.False(t, *agent.AppliedConfig.InlineConfig.Telemetry.Enabled,
+		"Grove TelemetryEnabled=false should override hub Enabled=true")
+}
+
+func TestPopulateAgentConfig_GroveTelemetryEnabledWithoutOtherConfig(t *testing.T) {
+	srv, _ := testServer(t)
+
+	// No hub telemetry config, no template — only grove sets enabled
+	grove := &store.Grove{
+		ID:   "grove-tel-only",
+		Slug: "tel-only-grove",
+		Annotations: map[string]string{
+			groveSettingTelemetryEnabled: "true",
+		},
+	}
+
+	agent := &store.Agent{
+		ID:            "agent-tel-only",
+		AppliedConfig: &store.AgentAppliedConfig{},
+	}
+
+	srv.populateAgentConfig(agent, grove, nil)
+
+	require.NotNil(t, agent.AppliedConfig.InlineConfig)
+	require.NotNil(t, agent.AppliedConfig.InlineConfig.Telemetry)
+	require.NotNil(t, agent.AppliedConfig.InlineConfig.Telemetry.Enabled)
+	assert.True(t, *agent.AppliedConfig.InlineConfig.Telemetry.Enabled,
+		"Grove TelemetryEnabled=true should create telemetry config with Enabled=true")
+}
+
 // TestCreateAgent_HubNativeGrove_ExplicitBroker_AutoLinks tests that creating an agent
 // in a hub-native grove with an explicitly selected broker auto-links the broker as a
 // provider, even if it wasn't previously registered as one.

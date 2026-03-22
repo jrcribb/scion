@@ -183,6 +183,10 @@ type GlobalConfig struct {
 	// state for new agents via GET /api/v1/settings/public.
 	TelemetryEnabled *bool `json:"telemetryEnabled,omitempty" yaml:"telemetryEnabled,omitempty" koanf:"telemetryEnabled"`
 
+	// TelemetryConfig holds the full telemetry configuration from settings.yaml.
+	// Used to populate default telemetry config on new agents.
+	TelemetryConfig *V1TelemetryConfig `json:"-" yaml:"-" koanf:"-"`
+
 	// GitHub App settings
 	GitHubApp GitHubAppConfig `json:"githubApp" yaml:"githubApp" koanf:"githubApp"`
 }
@@ -714,6 +718,7 @@ func loadServerFromSettingsFile(dir string) (*GlobalConfig, bool) {
 				if telCfg.Enabled != nil {
 					gc.TelemetryEnabled = telCfg.Enabled
 				}
+				gc.TelemetryConfig = &telCfg
 			}
 		}
 	}
