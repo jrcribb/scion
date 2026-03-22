@@ -41,6 +41,12 @@ func setupCompositionTest(t *testing.T) (tmpDir, globalScionDir, projectScionDir
 	globalScionDir = filepath.Join(tmpDir, ".scion")
 	os.MkdirAll(filepath.Join(globalScionDir, "templates"), 0755)
 
+	// Seed the default template so template chain inheritance works
+	defaultTplDir := filepath.Join(globalScionDir, "templates", "default")
+	if err := config.SeedAgnosticTemplate(defaultTplDir, false); err != nil {
+		t.Fatalf("failed to seed default template: %v", err)
+	}
+
 	projectDir := filepath.Join(tmpDir, "project")
 	projectScionDir = filepath.Join(projectDir, ".scion")
 	os.MkdirAll(projectScionDir, 0755)

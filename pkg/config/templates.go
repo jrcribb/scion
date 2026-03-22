@@ -295,9 +295,20 @@ func DeriveTemplateName(uri string) string {
 	return "remote"
 }
 
-// GetTemplateChain returns a list of templates in inheritance order (base first)
+// GetTemplateChain returns a list of templates in inheritance order (base first).
+// For non-default templates, the default template is automatically prepended
+// to the chain so that common home files and config are inherited.
 func GetTemplateChain(name string) ([]*Template, error) {
 	var chain []*Template
+
+	// For non-default templates, prepend the default template as a base layer
+	if name != "default" {
+		defaultTpl, err := FindTemplate("default")
+		if err == nil {
+			chain = append(chain, defaultTpl)
+		}
+		// If default template is not found, proceed without it
+	}
 
 	tpl, err := FindTemplate(name)
 	if err != nil {
@@ -348,8 +359,19 @@ func FindTemplateInGrovePath(name, grovePath string) (*Template, error) {
 
 // GetTemplateChainInGrove returns a list of templates in inheritance order,
 // using a specific grove path for template resolution instead of CWD.
+// For non-default templates, the default template is automatically prepended
+// to the chain so that common home files and config are inherited.
 func GetTemplateChainInGrove(name, grovePath string) ([]*Template, error) {
 	var chain []*Template
+
+	// For non-default templates, prepend the default template as a base layer
+	if name != "default" {
+		defaultTpl, err := FindTemplateInGrovePath("default", grovePath)
+		if err == nil {
+			chain = append(chain, defaultTpl)
+		}
+		// If default template is not found, proceed without it
+	}
 
 	tpl, err := FindTemplateInGrovePath(name, grovePath)
 	if err != nil {

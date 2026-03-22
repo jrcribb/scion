@@ -611,6 +611,61 @@ func TestGetTemplateChainInGrove(t *testing.T) {
 	}
 }
 
+func TestGetTemplateChainInGroveWithDefault(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "scion-test-chain-default-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", origHome)
+
+	origWd, _ := os.Getwd()
+	defer os.Chdir(origWd)
+	os.Chdir(tmpDir)
+
+	grovePath := filepath.Join(tmpDir, "project", DotScion)
+
+	// Create both default and custom templates in the grove
+	defaultTplDir := filepath.Join(grovePath, "templates", "default")
+	customTplDir := filepath.Join(grovePath, "templates", "custom")
+	if err := os.MkdirAll(defaultTplDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(customTplDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Non-default template should produce a 2-link chain: [default, custom]
+	chain, err := GetTemplateChainInGrove("custom", grovePath)
+	if err != nil {
+		t.Fatalf("GetTemplateChainInGrove failed: %v", err)
+	}
+	if len(chain) != 2 {
+		t.Fatalf("expected chain length 2, got %d", len(chain))
+	}
+	if chain[0].Path != defaultTplDir {
+		t.Errorf("expected chain[0] path %q, got %q", defaultTplDir, chain[0].Path)
+	}
+	if chain[1].Path != customTplDir {
+		t.Errorf("expected chain[1] path %q, got %q", customTplDir, chain[1].Path)
+	}
+
+	// Default template itself should produce a 1-link chain: [default]
+	chain, err = GetTemplateChainInGrove("default", grovePath)
+	if err != nil {
+		t.Fatalf("GetTemplateChainInGrove for default failed: %v", err)
+	}
+	if len(chain) != 1 {
+		t.Fatalf("expected chain length 1 for default, got %d", len(chain))
+	}
+	if chain[0].Path != defaultTplDir {
+		t.Errorf("expected path %q, got %q", defaultTplDir, chain[0].Path)
+	}
+}
+
 func TestImageFieldLoadingAndMerging(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "scion-test-image-field")
 	if err != nil {

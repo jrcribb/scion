@@ -282,8 +282,10 @@ func GetEnclosingGrovePath() (grovePath string, rootDir string, found bool) {
 }
 
 // SeedAgnosticTemplate seeds the default agnostic template from embedded files.
-// It recursively copies all files and directories (including home/.tmux.conf,
-// home/.zshrc, etc.) into the target directory.
+// It recursively copies all files and directories into the target directory.
+// Common home files (.tmux.conf, .zshrc, .gitconfig, .geminiignore) are
+// embedded directly under embeds/templates/default/home/ and copied as part
+// of the normal walk — no separate SeedCommonFiles step is needed.
 func SeedAgnosticTemplate(targetDir string, force bool) error {
 	templateBase := "embeds/templates/default"
 
@@ -338,8 +340,7 @@ func SeedAgnosticTemplate(targetDir string, force bool) error {
 		return err
 	}
 
-	// Seed common files (.tmux.conf, .zshrc) from embeds/common/
-	return SeedCommonFiles(targetDir, "", force)
+	return nil
 }
 
 // InitProjectOpts controls optional behavior for InitProject.

@@ -628,11 +628,6 @@ func ProvisionAgent(ctx context.Context, agentName string, templateName string, 
 		}
 	}
 
-	// Step 6: Copy common files (.tmux.conf, .zshrc)
-	if err := config.SeedCommonFilesToHome(agentHome, false); err != nil {
-		return "", "", nil, fmt.Errorf("failed to seed common files: %w", err)
-	}
-
 	// 2e. Merge settings env, auth, and resources if available
 	if settings != nil {
 		hConfig, err := settings.ResolveHarnessConfig(profileName, harnessConfigName)
