@@ -47,6 +47,7 @@ const USED_ICONS = [
   'box-arrow-in-right',
   'box-arrow-right',
   'box-arrow-up-right',
+  'broadcast-pin',
   'chevron-down',
   'chevron-left',
   'chevron-right',

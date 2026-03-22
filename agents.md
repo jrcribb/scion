@@ -65,6 +65,10 @@
   - `src/server`: Node.js/Koa backend-for-frontend (BFF) and SSR.
 - `.design/`: Design specifications and architectural documents. **Review `hosted/` for the latest architecture.**
 
+## Web Frontend: Shoelace Icon Registration
+
+All icons in the web frontend use the Shoelace `<sl-icon>` component (Bootstrap Icons). **Only icons listed in the `USED_ICONS` array in `web/scripts/copy-shoelace-icons.mjs` are included in production builds.** When adding a new `<sl-icon name="...">` reference, you **must** also add the icon name to that array, then run `npm run copy:shoelace-icons`. Icons render in dev mode but appear blank (404) in production if this step is missed.
+
 ## Development Guidelines
 - **Idiomatic Go**: Follow standard Go patterns and naming conventions.
 - **Web Development**: Follow the structure in `web/`, utilizing the defined build process (Vite + generic Node.js server).
