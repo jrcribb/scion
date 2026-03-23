@@ -716,7 +716,7 @@ func extractEvents(entries []GCPLogEntry, agents []AgentInfo) []PlaybackEvent {
 				continue
 			}
 			stateEvt, ok := prev.Data.(AgentStateEvent)
-			if !ok || stateEvt.Activity != "executing" || stateEvt.ToolName != "Bash" {
+			if !ok || stateEvt.Activity != "executing" || !isShellTool(stateEvt.ToolName) {
 				continue
 			}
 			evtTime, err := TimestampToTime(prev.Timestamp)
@@ -790,7 +790,7 @@ func extractEvents(entries []GCPLogEntry, agents []AgentInfo) []PlaybackEvent {
 			if !ok {
 				continue
 			}
-			if stateEvt.Activity != "executing" || stateEvt.ToolName != "Bash" {
+			if stateEvt.Activity != "executing" || !isShellTool(stateEvt.ToolName) {
 				continue
 			}
 			evtTime, err := TimestampToTime(evt.Timestamp)
@@ -832,6 +832,14 @@ func extractEvents(entries []GCPLogEntry, agents []AgentInfo) []PlaybackEvent {
 func isFileEditTool(name string) bool {
 	switch name {
 	case "write_file", "create_file", "Write", "edit_file", "Edit", "patch_file":
+		return true
+	}
+	return false
+}
+
+func isShellTool(name string) bool {
+	switch name {
+	case "Bash", "run_shell_command":
 		return true
 	}
 	return false

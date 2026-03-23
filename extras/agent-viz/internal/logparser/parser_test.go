@@ -210,6 +210,25 @@ func TestIsFileReadTool(t *testing.T) {
 	}
 }
 
+func TestIsShellTool(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected bool
+	}{
+		{"Bash", true},
+		{"run_shell_command", true},
+		{"Read", false},
+		{"Write", false},
+		{"edit_file", false},
+	}
+
+	for _, tt := range tests {
+		if got := isShellTool(tt.name); got != tt.expected {
+			t.Errorf("isShellTool(%q) = %v, want %v", tt.name, got, tt.expected)
+		}
+	}
+}
+
 func TestTimestampToTime(t *testing.T) {
 	ts := "2026-03-22T16:30:00.123456789Z"
 	tm, err := TimestampToTime(ts)
