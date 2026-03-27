@@ -32,6 +32,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
 
 const SRC = resolve(ROOT, 'node_modules/@shoelace-style/shoelace/dist/assets/icons');
+const SRC_FALLBACK = resolve(ROOT, 'node_modules/bootstrap-icons/icons');
 const DEST = resolve(ROOT, 'public/shoelace/assets/icons');
 
 /** Icons referenced via <sl-icon name="..."> across the app. */
@@ -130,12 +131,16 @@ let missing = 0;
 
 for (const name of USED_ICONS) {
   const src = resolve(SRC, `${name}.svg`);
+  const srcFallback = resolve(SRC_FALLBACK, `${name}.svg`);
   const dest = resolve(DEST, `${name}.svg`);
   if (existsSync(src)) {
     cpSync(src, dest);
     copied++;
+  } else if (existsSync(srcFallback)) {
+    cpSync(srcFallback, dest);
+    copied++;
   } else {
-    console.warn(`  warning: icon "${name}.svg" not found in Shoelace assets`);
+    console.warn(`  warning: icon "${name}.svg" not found in Shoelace or Bootstrap Icons`);
     missing++;
   }
 }
