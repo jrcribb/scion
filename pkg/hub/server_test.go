@@ -385,6 +385,113 @@ func TestServer_SigningKeySyncFromStoreToBackend(t *testing.T) {
 	}
 }
 
+func TestServer_SigningKeyEmptyValueFromStore(t *testing.T) {
+	// Simulate the GCP Secret Manager scenario: the backend stores
+	// EncryptedValue="" in SQLite (using SecretRef instead). If GCP SM
+	// later becomes unavailable, ensureSigningKey must not silently return
+	// a nil key — it should generate a new one.
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	hubID := "test-empty-value-hub"
+
+	// Insert a signing key row with empty EncryptedValue (as the GCP backend would)
+	ctx := context.Background()
+	emptySecret := &store.Secret{
+		ID:             "hub-" + hubID + "-" + SecretKeyUserSigningKey,
+		Key:            SecretKeyUserSigningKey,
+		EncryptedValue: "",
+		SecretRef:      "gcpsm:projects/test/secrets/test-key",
+		Scope:          store.ScopeHub,
+		ScopeID:        hubID,
+		Description:    "Hub signing key (GCP ref only)",
+	}
+	if _, err := s.UpsertSecret(ctx, emptySecret); err != nil {
+		t.Fatalf("failed to insert empty-value secret: %v", err)
+	}
+
+	// Create server WITHOUT a secret backend (simulates backend unavailable)
+	cfg := DefaultServerConfig()
+	cfg.HubID = hubID
+	srv := New(cfg, s)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	if srv.userTokenService == nil {
+		t.Fatal("userTokenService should be initialized even when store has empty key value")
+	}
+
+	key := srv.userTokenService.config.SigningKey
+	if len(key) == 0 {
+		t.Fatal("signing key should not be empty — server should have generated a new one")
+	}
+	if len(key) != 32 {
+		t.Fatalf("signing key should be 32 bytes, got %d", len(key))
+	}
+
+	// Verify the new key actually works for token operations
+	accessToken, _, _, err := srv.userTokenService.GenerateTokenPair(
+		"user-1", "test@example.com", "Test", store.UserRoleAdmin, ClientTypeWeb,
+	)
+	if err != nil {
+		t.Fatalf("GenerateTokenPair failed: %v", err)
+	}
+	claims, err := srv.userTokenService.ValidateUserToken(accessToken)
+	if err != nil {
+		t.Fatalf("ValidateUserToken failed: %v", err)
+	}
+	if claims.Email != "test@example.com" {
+		t.Errorf("expected email test@example.com, got %s", claims.Email)
+	}
+}
+
+func TestServer_SigningKeyBackupAfterBackendSet(t *testing.T) {
+	// Verify that after persisting a key through the secret backend,
+	// the actual key value remains in SQLite as a backup.
+	s, err := sqlite.New(":memory:")
+	if err != nil {
+		t.Fatalf("failed to create test store: %v", err)
+	}
+	if err := s.Migrate(context.Background()); err != nil {
+		t.Fatalf("failed to migrate test store: %v", err)
+	}
+
+	hubID := "test-backup-hub"
+	backend := secret.NewLocalBackend(s, hubID)
+
+	cfg := DefaultServerConfig()
+	cfg.HubID = hubID
+	cfg.SecretBackend = backend
+
+	// Create server — generates new keys via backend
+	srv := New(cfg, s)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
+
+	key := srv.userTokenService.config.SigningKey
+
+	// Verify the key value is in SQLite directly (not just a backend ref)
+	ctx := context.Background()
+	val, err := s.GetSecretValue(ctx, SecretKeyUserSigningKey, store.ScopeHub, hubID)
+	if err != nil {
+		t.Fatalf("signing key should be in SQLite store: %v", err)
+	}
+	if val == "" {
+		t.Fatal("SQLite should contain the actual key value as backup, not an empty string")
+	}
+
+	decodedKey, err := base64.StdEncoding.DecodeString(val)
+	if err != nil {
+		t.Fatalf("failed to decode key from SQLite: %v", err)
+	}
+	if string(decodedKey) != string(key) {
+		t.Error("SQLite backup key should match the active signing key")
+	}
+}
+
 func TestServer_GenerateAgentToken_DevAuthAutoGrantsScopes(t *testing.T) {
 	s, err := sqlite.New(":memory:")
 	if err != nil {

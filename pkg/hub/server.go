@@ -726,29 +726,46 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 	// Fallback: try loading from the store directly (for migration/local dev)
 	val, err := s.store.GetSecretValue(ctx, keyName, store.ScopeHub, hubID)
 	if err == nil {
-		slog.Info("Loaded existing signing key from store", "key", keyName)
-		key, decErr := base64.StdEncoding.DecodeString(val)
-		if decErr != nil {
-			return nil, fmt.Errorf("failed to decode signing key %s from store: %w", keyName, decErr)
-		}
-		// Sync to secret backend so future restarts load from the authoritative source.
-		if s.secretBackend != nil {
-			input := &secret.SetSecretInput{
-				Name:        keyName,
-				Value:       val,
-				Scope:       store.ScopeHub,
-				ScopeID:     hubID,
-				Description: fmt.Sprintf("Hub signing key for %s (synced from store)", keyName),
+		if val == "" {
+			// The GCP secret backend stores EncryptedValue="" in SQLite (using a
+			// SecretRef instead). If GCP SM later loses the secret, this fallback
+			// finds the empty row. Treat it as not-found so we continue to legacy
+			// migration or generate a new key rather than silently returning nil.
+			slog.Warn("Store contains empty signing key value (secret backend reference row); treating as not found", "key", keyName)
+		} else {
+			slog.Info("Loaded existing signing key from store", "key", keyName)
+			key, decErr := base64.StdEncoding.DecodeString(val)
+			if decErr != nil {
+				return nil, fmt.Errorf("failed to decode signing key %s from store: %w", keyName, decErr)
 			}
-			if _, _, syncErr := s.secretBackend.Set(ctx, input); syncErr == nil {
-				slog.Info("Synced signing key from store to secret backend", "key", keyName)
-			} else {
-				slog.Warn("Failed to sync signing key to secret backend", "key", keyName, "error", syncErr)
+			if len(key) == 0 {
+				return nil, fmt.Errorf("signing key %s decoded to empty value", keyName)
 			}
+			// Sync to secret backend so future restarts load from the authoritative source.
+			if s.secretBackend != nil {
+				input := &secret.SetSecretInput{
+					Name:        keyName,
+					Value:       val,
+					Scope:       store.ScopeHub,
+					ScopeID:     hubID,
+					Description: fmt.Sprintf("Hub signing key for %s (synced from store)", keyName),
+				}
+				if _, _, syncErr := s.secretBackend.Set(ctx, input); syncErr == nil {
+					slog.Info("Synced signing key from store to secret backend", "key", keyName)
+				} else {
+					slog.Warn("Failed to sync signing key to secret backend", "key", keyName, "error", syncErr)
+				}
+				// Re-persist the actual value to SQLite. The backend's Set() stores
+				// EncryptedValue="" (using a SecretRef), which would leave SQLite
+				// without the key material. Keep a local backup so the key survives
+				// even if the secret backend becomes unavailable.
+				if persistErr := s.persistSigningKey(ctx, keyName, val, hubID); persistErr != nil {
+					slog.Warn("Failed to re-persist signing key backup to store after sync", "key", keyName, "error", persistErr)
+				}
+			}
+			return key, nil
 		}
-		return key, nil
-	}
-	if err != store.ErrNotFound {
+	} else if err != store.ErrNotFound {
 		return nil, fmt.Errorf("failed to load signing key %s from store: %w", keyName, err)
 	}
 
@@ -803,6 +820,12 @@ func (s *Server) ensureSigningKey(ctx context.Context, keyName string, existingK
 		}
 		if _, _, err := s.secretBackend.Set(ctx, input); err == nil {
 			slog.Info("Persisted new signing key via secret backend", "key", keyName)
+			// Also persist to SQLite as backup. The backend's Set() stores
+			// EncryptedValue="" (using a SecretRef), so without this the key
+			// material would be lost if the secret backend becomes unavailable.
+			if persistErr := s.persistSigningKey(ctx, keyName, encodedKey, hubID); persistErr != nil {
+				slog.Warn("Failed to persist signing key backup to store", "key", keyName, "error", persistErr)
+			}
 			return newKey, nil
 		} else {
 			slog.Warn("Secret backend unavailable for signing key, falling back to store", "key", keyName, "error", err)
