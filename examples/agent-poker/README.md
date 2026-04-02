@@ -34,6 +34,9 @@ The dealer has a Python script (`deck.py`) that manages a standard 52-card deck 
 # Initialize a grove for the poker game
 scion init poker-night
 
+# Import the templates
+scion templates import --all https://github.com/GoogleCloudPlatform/scion/main/examples/agent-poker/templates
+
 # Create the dealer agent from template
 scion create dealer --template poker-dealer
 
