@@ -225,8 +225,10 @@ The install script requires sudo (for systemd, Caddy, and `/usr/local/bin`). On 
 ```bash
 # Replace INSTANCE and ZONE with your hub VM values.
 # Instance name is "scion-${HUB_NAME}" (e.g., scion-gteam).
-gcloud compute ssh INSTANCE --zone=ZONE --command \
-  'cd /home/scion/scion/extras/scion-chat-app && sudo -u scion make build && sudo make install'
+gcloud compute ssh INSTANCE --zone=ZONE --command '
+  sudo -u scion sh -c "cd /home/scion/scion/extras/scion-chat-app && make build"
+  sudo /home/scion/scion/extras/scion-chat-app/install.sh
+'
 ```
 
 ### First-time setup
@@ -235,12 +237,13 @@ Before running `make install`, create the chat-app env file on the VM:
 
 ```bash
 gcloud compute ssh INSTANCE --zone=ZONE --command '
-  sudo cp /home/scion/scion/extras/scion-chat-app/chat-app.env.sample /home/scion/.scion/chat-app.env
-  sudo chown scion:scion /home/scion/.scion/chat-app.env
-  sudo chmod 600 /home/scion/.scion/chat-app.env
+  sudo install -m 600 -o scion -g scion \
+    /home/scion/scion/extras/scion-chat-app/chat-app.env.sample \
+    /home/scion/.scion/chat-app.env
 '
-# Then edit with your values (project ID, SA email, hub user):
-gcloud compute ssh INSTANCE --zone=ZONE --command 'sudo -u scion nano /home/scion/.scion/chat-app.env'
+# Then SSH in and edit with your values (project ID, SA email, hub user):
+gcloud compute ssh INSTANCE --zone=ZONE
+sudo -u scion nano /home/scion/.scion/chat-app.env
 ```
 
 > **Note:** `CHAT_APP_CREDENTIALS` is optional. On a GCE VM the app uses Application Default Credentials (ADC) from the instance's attached service account. If the service account lacks Chat API permissions, the app prints remediation steps including the required `gcloud` commands at startup.
