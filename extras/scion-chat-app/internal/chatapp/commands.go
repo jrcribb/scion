@@ -497,11 +497,15 @@ func (r *CommandRouter) cmdLink(ctx context.Context, event *ChatEvent, args []st
 		return r.reply(ctx, event, fmt.Sprintf("Failed to create client: %v", err))
 	}
 
-	// Look up the grove
-	grove, err := client.Groves().Get(ctx, args[0])
+	// Look up the grove by slug
+	groveList, err := client.Groves().List(ctx, &hubclient.ListGrovesOptions{Slug: args[0]})
 	if err != nil {
-		return r.reply(ctx, event, fmt.Sprintf("Grove `%s` not found: %v", args[0], err))
+		return r.reply(ctx, event, fmt.Sprintf("Failed to look up grove `%s`: %v", args[0], err))
 	}
+	if len(groveList.Groves) == 0 {
+		return r.reply(ctx, event, fmt.Sprintf("Grove `%s` not found. Use the grove slug, not the ID.", args[0]))
+	}
+	grove := &groveList.Groves[0]
 
 	// Save the link
 	link := &state.SpaceLink{
@@ -985,9 +989,9 @@ func (r *CommandRouter) cmdInfo(ctx context.Context, event *ChatEvent, args []st
 	if link != nil && mapping != nil {
 		client, clientErr := r.idMapper.ClientFor(ctx, mapping)
 		if clientErr == nil {
-			grove, groveErr := client.Groves().Get(ctx, link.GroveSlug)
-			if groveErr == nil {
-				widgets = append(widgets, Widget{Type: WidgetKeyValue, Label: "Agents", Content: fmt.Sprintf("%d", grove.AgentCount)})
+			groveList, groveErr := client.Groves().List(ctx, &hubclient.ListGrovesOptions{Slug: link.GroveSlug})
+			if groveErr == nil && len(groveList.Groves) > 0 {
+				widgets = append(widgets, Widget{Type: WidgetKeyValue, Label: "Agents", Content: fmt.Sprintf("%d", groveList.Groves[0].AgentCount)})
 			}
 		}
 	}
