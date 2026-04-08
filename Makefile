@@ -58,7 +58,7 @@ golangci-lint:
 		exit 1; \
 	fi
 	@echo "Running golangci-lint (new issues vs main)..."
-	@GOGC=50 $(GOLANGCI_LINT) run --build-tags no_sqlite --new-from-rev=main ./...
+	@GOGC=50 $(GOLANGCI_LINT) run --new-from-rev=main ./...
 	@echo "golangci-lint passed."
 
 ## web: Build the web frontend
