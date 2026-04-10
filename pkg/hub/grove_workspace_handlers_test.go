@@ -91,6 +91,19 @@ func createTestHubNativeGrove(t *testing.T, srv *Server, name string) (*store.Gr
 	return &grove, workspacePath
 }
 
+// resolveTestSharedDirPath resolves the grove-configs shared dir path for a test
+// hub-native grove. This matches the path that resolveHubGroveSharedDirPath uses
+// in production: it reads the .scion marker to find the grove-configs directory.
+func resolveTestSharedDirPath(t *testing.T, workspacePath, dirName string) string {
+	t.Helper()
+	scionPath := filepath.Join(workspacePath, config.DotScion)
+	projectDir, _, err := config.ResolveGrovePath(scionPath)
+	require.NoError(t, err, "failed to resolve grove path from marker at %s", scionPath)
+	sdPath, err := config.GetSharedDirPath(projectDir, dirName)
+	require.NoError(t, err)
+	return sdPath
+}
+
 // createTestGitGrove creates a git-backed grove via the API.
 func createTestGitGrove(t *testing.T, srv *Server, name, remote string) *store.Grove {
 	t.Helper()
@@ -826,8 +839,9 @@ func TestSharedDirFiles_UploadAndList(t *testing.T) {
 	rec := doMultipartRequest(t, srv, http.MethodPost, fmt.Sprintf("/api/v1/groves/%s/shared-dirs/artifacts/files", grove.ID), files)
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 
-	// Verify file on disk
-	content, err := os.ReadFile(filepath.Join(workspacePath, "shared-dirs", "artifacts", "output.log"))
+	// Verify file on disk — shared dirs live under grove-configs, not the workspace
+	sdPath := resolveTestSharedDirPath(t, workspacePath, "artifacts")
+	content, err := os.ReadFile(filepath.Join(sdPath, "output.log"))
 	require.NoError(t, err)
 	assert.Equal(t, "build log content", string(content))
 
@@ -847,8 +861,8 @@ func TestSharedDirFiles_Download(t *testing.T) {
 
 	addSharedDirToGrove(t, srv, grove.ID, "data")
 
-	// Create a file directly
-	sharedDirPath := filepath.Join(workspacePath, "shared-dirs", "data")
+	// Create a file directly at the grove-configs shared dir path
+	sharedDirPath := resolveTestSharedDirPath(t, workspacePath, "data")
 	require.NoError(t, os.MkdirAll(sharedDirPath, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(sharedDirPath, "result.txt"), []byte("result data"), 0644))
 
@@ -863,8 +877,8 @@ func TestSharedDirFiles_Delete(t *testing.T) {
 
 	addSharedDirToGrove(t, srv, grove.ID, "temp")
 
-	// Create a file
-	sharedDirPath := filepath.Join(workspacePath, "shared-dirs", "temp")
+	// Create a file at the grove-configs shared dir path
+	sharedDirPath := resolveTestSharedDirPath(t, workspacePath, "temp")
 	require.NoError(t, os.MkdirAll(sharedDirPath, 0755))
 	require.NoError(t, os.WriteFile(filepath.Join(sharedDirPath, "old.txt"), []byte("old"), 0644))
 
@@ -915,16 +929,32 @@ func TestSharedDirFiles_GitGroveWithEmbeddedBroker(t *testing.T) {
 	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
 	srv.SetEmbeddedBrokerID(broker.ID)
 
-	// Add as provider WITHOUT LocalPath (simulates auto-link)
+	// Add as provider WITHOUT LocalPath (simulates auto-link / shared-workspace)
 	provider := &store.GroveProvider{
 		GroveID:    grove.ID,
 		BrokerID:   broker.ID,
 		BrokerName: broker.Name,
-		// LocalPath intentionally empty — fallback to hub-managed path
+		// LocalPath intentionally empty — fallback resolves via hub workspace marker
 	}
 	require.NoError(t, s.AddGroveProvider(ctx, provider))
 
-	// Should now work via hub-managed path fallback
+	// Initialize a hub workspace so the .scion marker exists for path resolution.
+	// This simulates a shared-workspace grove that was cloned by the hub.
+	workspacePath, err := hubNativeGrovePath(grove.Slug)
+	require.NoError(t, err)
+	scionDir := filepath.Join(workspacePath, config.DotScion)
+	require.NoError(t, config.InitProject(scionDir, nil, config.InitProjectOpts{SkipRuntimeCheck: true}))
+
+	t.Cleanup(func() {
+		// Clean up the external grove-config directory via marker resolution
+		if resolved, rErr := config.ResolveGroveMarker(scionDir); rErr == nil {
+			// resolved is ~/.scion/grove-configs/<slug>__<uuid>/.scion/
+			os.RemoveAll(filepath.Dir(resolved))
+		}
+		os.RemoveAll(workspacePath)
+	})
+
+	// Should now work via marker-based path resolution
 	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/shared-dirs/build-cache/files", grove.ID), nil)
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 
@@ -932,11 +962,6 @@ func TestSharedDirFiles_GitGroveWithEmbeddedBroker(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Equal(t, 0, resp.TotalCount)
 	assert.Equal(t, 1, resp.ProviderCount)
-
-	// Clean up hub-managed grove path
-	workspacePath, err := hubNativeGrovePath(grove.Slug)
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(workspacePath) })
 }
 
 func TestSharedDirFiles_GitGroveMultipleProviders(t *testing.T) {
@@ -975,6 +1000,19 @@ func TestSharedDirFiles_GitGroveMultipleProviders(t *testing.T) {
 		GroveID: grove.ID, BrokerID: remoteBroker.ID, BrokerName: remoteBroker.Name,
 	}))
 
+	// Initialize a hub workspace so the .scion marker exists for path resolution
+	workspacePath, err := hubNativeGrovePath(grove.Slug)
+	require.NoError(t, err)
+	scionDir := filepath.Join(workspacePath, config.DotScion)
+	require.NoError(t, config.InitProject(scionDir, nil, config.InitProjectOpts{SkipRuntimeCheck: true}))
+
+	t.Cleanup(func() {
+		if resolved, rErr := config.ResolveGroveMarker(scionDir); rErr == nil {
+			os.RemoveAll(filepath.Dir(resolved))
+		}
+		os.RemoveAll(workspacePath)
+	})
+
 	// Request should succeed and report providerCount=2
 	rec := doRequest(t, srv, http.MethodGet, fmt.Sprintf("/api/v1/groves/%s/shared-dirs/artifacts/files", grove.ID), nil)
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
@@ -982,11 +1020,6 @@ func TestSharedDirFiles_GitGroveMultipleProviders(t *testing.T) {
 	var resp SharedDirListResponse
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
 	assert.Equal(t, 2, resp.ProviderCount)
-
-	// Clean up
-	workspacePath, err := hubNativeGrovePath(grove.Slug)
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(workspacePath) })
 }
 
 // =============================================================================

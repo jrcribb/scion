@@ -684,18 +684,21 @@ type sharedDirResolution struct {
 }
 
 // resolveSharedDirPath resolves the host-side path for a shared directory.
-// For hub-native groves, the path is under ~/.scion/groves/<slug>/shared-dirs/<name>.
-// For git-based groves, the path is resolved via the co-located broker's local grove path,
-// with a fallback to hub-managed storage when the broker has no local path recorded.
+// Shared dirs always live under ~/.scion/grove-configs/<slug>__<uuid>/shared-dirs/<name>,
+// matching the path used by agent provisioning (config.GetSharedDirPath).
+// For git-based groves with a co-located broker that has a LocalPath, the path is
+// resolved via config.GetSharedDirPath(localPath, dirName). Otherwise, the path is
+// resolved via the .scion marker in the hub-native workspace directory.
 func (s *Server) resolveSharedDirPath(ctx context.Context, grove *store.Grove, dirName string) (*sharedDirResolution, error) {
 	if grove.GitRemote == "" {
-		// Hub-native grove: shared dirs live under the hub-managed grove path
-		workspacePath, err := hubNativeGrovePath(grove.Slug)
+		// Hub-native grove: resolve via the .scion marker in the workspace directory
+		// to find the grove-configs path where shared dirs actually live.
+		sdPath, err := resolveHubGroveSharedDirPath(grove.Slug, dirName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve grove path")
+			return nil, fmt.Errorf("failed to resolve shared directory path: %w", err)
 		}
 		return &sharedDirResolution{
-			Path:    filepath.Join(workspacePath, "shared-dirs", dirName),
+			Path:    sdPath,
 			IsLocal: true,
 		}, nil
 	}
@@ -729,20 +732,38 @@ func (s *Server) resolveSharedDirPath(ctx context.Context, grove *store.Grove, d
 	}
 
 	// Fallback: embedded broker is a provider but has no LocalPath recorded
-	// (e.g. auto-linked). Use hub-managed storage since we share the filesystem.
+	// (e.g. auto-linked or shared-workspace grove). Resolve via the .scion marker
+	// in the hub workspace to find the grove-configs path.
 	if embeddedIsProvider {
-		workspacePath, err := hubNativeGrovePath(grove.Slug)
+		sdPath, err := resolveHubGroveSharedDirPath(grove.Slug, dirName)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve grove path")
+			return nil, fmt.Errorf("failed to resolve shared directory path: %w", err)
 		}
 		return &sharedDirResolution{
-			Path:          filepath.Join(workspacePath, "shared-dirs", dirName),
+			Path:          sdPath,
 			ProviderCount: providerCount,
 			IsLocal:       true,
 		}, nil
 	}
 
 	return nil, fmt.Errorf("shared directory file browsing requires a co-located runtime broker")
+}
+
+// resolveHubGroveSharedDirPath resolves the grove-configs shared dir path for
+// a grove whose workspace lives at ~/.scion/groves/<slug>/. It reads the .scion
+// marker (or grove-id for git clones) to find the external grove-configs path,
+// then returns the shared-dirs/<name> subdirectory within it.
+func resolveHubGroveSharedDirPath(groveSlug, dirName string) (string, error) {
+	workspacePath, err := hubNativeGrovePath(groveSlug)
+	if err != nil {
+		return "", err
+	}
+	scionPath := filepath.Join(workspacePath, config.DotScion)
+	projectDir, _, err := config.ResolveGrovePath(scionPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve grove path for %s: %w", groveSlug, err)
+	}
+	return config.GetSharedDirPath(projectDir, dirName)
 }
 
 // validateWorkspaceFilePath validates that a file path is safe for workspace operations.
