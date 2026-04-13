@@ -802,6 +802,115 @@ func TestValidateAgnosticTemplate_ValidTemplate(t *testing.T) {
 }
 
 func TestMergeScionConfig_NewFields(t *testing.T) {
+	t.Run("kubernetes override merges all supported fields", func(t *testing.T) {
+		base := &api.ScionConfig{
+			Kubernetes: &api.KubernetesConfig{
+				Context:            "base-ctx",
+				Namespace:          "base-ns",
+				RuntimeClassName:   "base-runtime",
+				ServiceAccountName: "base-sa",
+				Resources: &api.K8sResources{
+					Requests: map[string]string{"cpu": "250m"},
+					Limits:   map[string]string{"memory": "512Mi"},
+				},
+				NodeSelector:          map[string]string{"base": "true"},
+				Tolerations:           []api.K8sToleration{{Key: "base", Operator: "Exists"}},
+				ImagePullPolicy:       "IfNotPresent",
+				SharedDirStorageClass: "base-sc",
+				SharedDirSize:         "10Gi",
+			},
+		}
+		override := &api.ScionConfig{
+			Kubernetes: &api.KubernetesConfig{
+				Context:            "override-ctx",
+				Namespace:          "override-ns",
+				RuntimeClassName:   "override-runtime",
+				ServiceAccountName: "override-sa",
+				Resources: &api.K8sResources{
+					Requests: map[string]string{"memory": "1Gi"},
+					Limits:   map[string]string{"cpu": "500m"},
+				},
+				NodeSelector:          map[string]string{"override": "true"},
+				Tolerations:           []api.K8sToleration{{Key: "override", Operator: "Equal", Value: "true"}},
+				ImagePullPolicy:       "Never",
+				SharedDirStorageClass: "override-sc",
+				SharedDirSize:         "20Gi",
+			},
+		}
+
+		got := MergeScionConfig(base, override)
+		if got.Kubernetes == nil {
+			t.Fatal("expected Kubernetes config to be present")
+		}
+		if got.Kubernetes.Context != "override-ctx" {
+			t.Errorf("expected Context override, got %q", got.Kubernetes.Context)
+		}
+		if got.Kubernetes.Namespace != "override-ns" {
+			t.Errorf("expected Namespace override, got %q", got.Kubernetes.Namespace)
+		}
+		if got.Kubernetes.RuntimeClassName != "override-runtime" {
+			t.Errorf("expected RuntimeClassName override, got %q", got.Kubernetes.RuntimeClassName)
+		}
+		if got.Kubernetes.ServiceAccountName != "override-sa" {
+			t.Errorf("expected ServiceAccountName override, got %q", got.Kubernetes.ServiceAccountName)
+		}
+		if got.Kubernetes.ImagePullPolicy != "Never" {
+			t.Errorf("expected ImagePullPolicy override, got %q", got.Kubernetes.ImagePullPolicy)
+		}
+		if got.Kubernetes.SharedDirStorageClass != "override-sc" {
+			t.Errorf("expected SharedDirStorageClass override, got %q", got.Kubernetes.SharedDirStorageClass)
+		}
+		if got.Kubernetes.SharedDirSize != "20Gi" {
+			t.Errorf("expected SharedDirSize override, got %q", got.Kubernetes.SharedDirSize)
+		}
+		if got.Kubernetes.Resources == nil {
+			t.Fatal("expected Resources override to be present")
+		}
+		if got.Kubernetes.Resources.Requests["cpu"] != "250m" || got.Kubernetes.Resources.Requests["memory"] != "1Gi" {
+			t.Errorf("expected Requests maps merged, got %#v", got.Kubernetes.Resources.Requests)
+		}
+		if got.Kubernetes.Resources.Limits["memory"] != "512Mi" || got.Kubernetes.Resources.Limits["cpu"] != "500m" {
+			t.Errorf("expected Limits maps merged, got %#v", got.Kubernetes.Resources.Limits)
+		}
+		if len(got.Kubernetes.NodeSelector) != 2 || got.Kubernetes.NodeSelector["base"] != "true" || got.Kubernetes.NodeSelector["override"] != "true" {
+			t.Errorf("expected NodeSelector merged, got %#v", got.Kubernetes.NodeSelector)
+		}
+		if len(got.Kubernetes.Tolerations) != 1 || got.Kubernetes.Tolerations[0].Key != "override" {
+			t.Errorf("expected Tolerations override, got %#v", got.Kubernetes.Tolerations)
+		}
+		if base.Kubernetes.ImagePullPolicy != "IfNotPresent" {
+			t.Errorf("expected base Kubernetes config to remain unchanged, got %q", base.Kubernetes.ImagePullPolicy)
+		}
+	})
+
+	t.Run("kubernetes empty override keeps base values", func(t *testing.T) {
+		base := &api.ScionConfig{
+			Kubernetes: &api.KubernetesConfig{
+				ServiceAccountName:    "base-sa",
+				ImagePullPolicy:       "Never",
+				SharedDirStorageClass: "base-sc",
+				SharedDirSize:         "10Gi",
+			},
+		}
+
+		got := MergeScionConfig(base, &api.ScionConfig{Kubernetes: &api.KubernetesConfig{}})
+		if got.Kubernetes == nil {
+			t.Fatal("expected Kubernetes config to be preserved")
+		}
+		if got.Kubernetes.ServiceAccountName != "base-sa" {
+			t.Errorf("expected ServiceAccountName preserved, got %q", got.Kubernetes.ServiceAccountName)
+		}
+		if got.Kubernetes.ImagePullPolicy != "Never" {
+			t.Errorf("expected ImagePullPolicy preserved, got %q", got.Kubernetes.ImagePullPolicy)
+		}
+		if got.Kubernetes.SharedDirStorageClass != "base-sc" {
+			t.Errorf("expected SharedDirStorageClass preserved, got %q", got.Kubernetes.SharedDirStorageClass)
+		}
+		if got.Kubernetes.SharedDirSize != "10Gi" {
+			t.Errorf("expected SharedDirSize preserved, got %q", got.Kubernetes.SharedDirSize)
+		}
+	})
+
 	t.Run("agent_instructions override replaces base", func(t *testing.T) {
 		base := &api.ScionConfig{AgentInstructions: "base-agents.md"}
 		override := &api.ScionConfig{AgentInstructions: "override-agents.md"}

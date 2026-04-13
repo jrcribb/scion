@@ -666,22 +666,7 @@ func MergeScionConfig(base, override *api.ScionConfig) *api.ScionConfig {
 		result.Model = override.Model
 	}
 	if override.Kubernetes != nil {
-		if result.Kubernetes == nil {
-			result.Kubernetes = override.Kubernetes
-		} else {
-			if override.Kubernetes.Context != "" {
-				result.Kubernetes.Context = override.Kubernetes.Context
-			}
-			if override.Kubernetes.Namespace != "" {
-				result.Kubernetes.Namespace = override.Kubernetes.Namespace
-			}
-			if override.Kubernetes.RuntimeClassName != "" {
-				result.Kubernetes.RuntimeClassName = override.Kubernetes.RuntimeClassName
-			}
-			if override.Kubernetes.Resources != nil {
-				result.Kubernetes.Resources = override.Kubernetes.Resources
-			}
-		}
+		result.Kubernetes = mergeKubernetesConfig(result.Kubernetes, override.Kubernetes)
 	}
 	if override.Resources != nil {
 		result.Resources = MergeResourceSpec(result.Resources, override.Resources)
@@ -774,6 +759,57 @@ func MergeScionConfig(base, override *api.ScionConfig) *api.ScionConfig {
 			}
 			result.Info = &infoCopy
 		}
+	}
+
+	return &result
+}
+
+func mergeKubernetesConfig(base, override *api.KubernetesConfig) *api.KubernetesConfig {
+	if override == nil {
+		return base
+	}
+
+	if base == nil {
+		base = &api.KubernetesConfig{}
+	}
+
+	result := *base
+
+	if override.Context != "" {
+		result.Context = override.Context
+	}
+	if override.Namespace != "" {
+		result.Namespace = override.Namespace
+	}
+	if override.RuntimeClassName != "" {
+		result.RuntimeClassName = override.RuntimeClassName
+	}
+	if override.ServiceAccountName != "" {
+		result.ServiceAccountName = override.ServiceAccountName
+	}
+	if override.Resources != nil {
+		if result.Resources == nil {
+			result.Resources = &api.K8sResources{}
+		}
+		result.Resources = &api.K8sResources{
+			Requests: mergeMaps(result.Resources.Requests, override.Resources.Requests),
+			Limits:   mergeMaps(result.Resources.Limits, override.Resources.Limits),
+		}
+	}
+	if override.NodeSelector != nil {
+		result.NodeSelector = mergeMaps(result.NodeSelector, override.NodeSelector)
+	}
+	if override.Tolerations != nil {
+		result.Tolerations = append([]api.K8sToleration(nil), override.Tolerations...)
+	}
+	if override.ImagePullPolicy != "" {
+		result.ImagePullPolicy = override.ImagePullPolicy
+	}
+	if override.SharedDirStorageClass != "" {
+		result.SharedDirStorageClass = override.SharedDirStorageClass
+	}
+	if override.SharedDirSize != "" {
+		result.SharedDirSize = override.SharedDirSize
 	}
 
 	return &result
