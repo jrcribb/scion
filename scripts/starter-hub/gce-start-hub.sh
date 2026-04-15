@@ -202,11 +202,21 @@ ${HUB_DOMAIN} {
 EOF
     substep "Prepared Caddyfile"
 
-    # Single SCP to upload all files, then single SSH to place them
+    # Upload all config files to /tmp/ on the instance; they are placed into
+    # their final locations at the start of the main remote SSH session.
     substep "Uploading files to instance..."
     gcloud compute scp "$UPLOAD_DIR"/* "${INSTANCE_NAME}:/tmp/" --zone="${ZONE}"
 
-    # Prepare directories and move hub.env into place via a single SSH call
+    substep "Files uploaded to instance"
+fi
+
+# --- Remote: Pull, Build, Restart, Health Check (single SSH session) ---
+
+# Build the conditional full-deploy remote commands
+FULL_REMOTE_COMMANDS=""
+if $FULL_DEPLOY; then
+    # Place uploaded config files (hub.env + settings.yaml) at the start of the remote session
+    # to avoid a separate SSH call just for file placement.
     PLACE_HUB_ENV=""
     if $HAS_HUB_ENV; then
         PLACE_HUB_ENV='
@@ -216,24 +226,17 @@ EOF
         echo "  -> Installed hub.env"'
     fi
 
-    gcloud compute ssh "${INSTANCE_NAME}" --zone="${ZONE}" --command "
-        set -euo pipefail
-        sudo mkdir -p /home/scion/.scion
-        sudo chown scion:scion /home/scion/.scion
-        ${PLACE_HUB_ENV}
-        sudo mv /tmp/scion-settings.yaml /home/scion/.scion/settings.yaml
-        sudo chown scion:scion /home/scion/.scion/settings.yaml
-        echo '  -> Installed settings.yaml'
-    "
-    substep "Config files placed on instance"
-fi
-
-# --- Remote: Pull, Build, Restart, Health Check (single SSH session) ---
-
-# Build the conditional full-deploy remote commands
-FULL_REMOTE_COMMANDS=""
-if $FULL_DEPLOY; then
     FULL_REMOTE_COMMANDS='
+    # Place uploaded config files
+    echo ""
+    echo "==> Placing config files..."
+    sudo mkdir -p /home/scion/.scion
+    sudo chown scion:scion /home/scion/.scion
+    '"${PLACE_HUB_ENV}"'
+    sudo mv /tmp/scion-settings.yaml /home/scion/.scion/settings.yaml
+    sudo chown scion:scion /home/scion/.scion/settings.yaml
+    echo "  -> Installed settings.yaml"
+
     # Ensure all build/runtime dependencies are present (cloud-init may have failed or not finished)
     NEED_APT_UPDATE=false
     for cmd in make curl git node certbot; do
