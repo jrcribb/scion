@@ -422,6 +422,11 @@ func (r *PodmanRuntime) Sync(ctx context.Context, id string, direction SyncDirec
 }
 
 func (r *PodmanRuntime) Exec(ctx context.Context, id string, cmd []string) (string, error) {
+	// Resolve slug/name to actual container ID (container names include the
+	// grove prefix, e.g. "mygrove--agent", so the bare slug won't match).
+	if agents, err := r.List(ctx, nil); err == nil {
+		id = resolveContainerID(agents, id)
+	}
 	args := append([]string{"exec", "--user", r.ExecUser(), id}, cmd...)
 	return runSimpleCommand(ctx, r.Command, args...)
 }

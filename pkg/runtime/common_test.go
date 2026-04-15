@@ -26,6 +26,91 @@ import (
 	"github.com/GoogleCloudPlatform/scion/pkg/harness"
 )
 
+func TestResolveContainerID(t *testing.T) {
+	agents := []api.AgentInfo{
+		{
+			ContainerID: "abc123def456789",
+			Name:        "my-agent",
+		},
+		{
+			ContainerID: "def456abc789012",
+			Name:        "mygrove--other-agent",
+		},
+		{
+			ContainerID: "fed987cba654321",
+			Name:        "/slash-agent", // Docker sometimes returns names with leading /
+		},
+	}
+
+	tests := []struct {
+		name string
+		id   string
+		want string
+	}{
+		{
+			name: "exact container ID",
+			id:   "abc123def456789",
+			want: "abc123def456789",
+		},
+		{
+			name: "exact name match",
+			id:   "my-agent",
+			want: "abc123def456789",
+		},
+		{
+			name: "agent name has leading slash, input does not",
+			id:   "slash-agent",
+			want: "fed987cba654321",
+		},
+		{
+			name: "short container ID prefix (12 chars)",
+			id:   "abc123def456",
+			want: "abc123def456789",
+		},
+		{
+			name: "grove-prefixed container name",
+			id:   "mygrove--other-agent",
+			want: "def456abc789012",
+		},
+		{
+			name: "slug not matching container name (broker scenario)",
+			id:   "other-agent",
+			want: "other-agent", // no match — fallback to raw id
+		},
+		{
+			name: "no match returns raw id",
+			id:   "nonexistent",
+			want: "nonexistent",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveContainerID(agents, tt.id)
+			if got != tt.want {
+				t.Errorf("resolveContainerID(%q) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveContainerID_SlugMatchesAgentName(t *testing.T) {
+	// Simulates the actual bug: container is named "grove--foo" but the
+	// scion.name label (populated into AgentInfo.Name) is "foo".  The broker
+	// passes the slug "foo" to Exec; the runtime must resolve it.
+	agents := []api.AgentInfo{
+		{
+			ContainerID: "a1b2c3d4e5f60000",
+			Name:        "foo", // scion.name label (slugified)
+		},
+	}
+
+	got := resolveContainerID(agents, "foo")
+	if got != "a1b2c3d4e5f60000" {
+		t.Errorf("resolveContainerID(\"foo\") = %q, want %q", got, "a1b2c3d4e5f60000")
+	}
+}
+
 func TestBuildCommonRunArgs(t *testing.T) {
 	tmpHome := t.TempDir()
 	tmpWorkspace := t.TempDir()

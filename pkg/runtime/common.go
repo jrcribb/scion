@@ -404,6 +404,22 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 	return args, nil
 }
 
+// resolveContainerID maps an agent identifier (slug, name, or partial
+// container ID) to the authoritative container ID used by the runtime.
+// When no match is found the original id is returned so callers can fall
+// back to the raw value (which may itself be a valid container name).
+func resolveContainerID(agents []api.AgentInfo, id string) string {
+	for _, a := range agents {
+		if a.ContainerID == id ||
+			(len(id) >= 12 && strings.HasPrefix(a.ContainerID, id)) ||
+			(len(a.ContainerID) >= 12 && strings.HasPrefix(id, a.ContainerID)) ||
+			a.Name == id || a.Name == "/"+id || strings.TrimPrefix(a.Name, "/") == id {
+			return a.ContainerID
+		}
+	}
+	return id
+}
+
 // runtimeLog is the structured logger for runtime command execution.
 var runtimeLog = slog.Default().With(slog.String("subsystem", "runtime"))
 
