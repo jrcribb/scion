@@ -265,110 +265,131 @@ Each harness has its own native configuration format and file path for MCP serve
 scion-agent.yaml              (template author defines mcp_servers)
        │
        ▼
-ScionConfig.MCPServers         (parsed and validated)
+ScionConfig.MCPServers         (parsed and validated at config load)
        │
        ▼
-provision.go                   (during agent creation)
+ContainerScriptHarness.Provision()   (host-side staging only — no file writes)
        │
-       ├──► harness.ProvisionMCPServers(agentHome, workspace, mcpServers)
-       │         │
-       │         ├── Claude:  merge into .claude.json mcpServers
-       │         ├── Gemini:  merge into .gemini/settings.json mcpServers
-       │         ├── Codex:   write to codex-specific location (TBD)
-       │         └── Generic: no-op or best-effort
+       ├──► writes inputs/mcp-servers.json to agent_home/.scion/harness/inputs/
        │
-       └──► (existing) write scion-services.yaml for sidecar services
+       └──► (existing) writes scion-services.yaml for sidecar services
+               │
+               ▼ [container starts]
+       sciontool harness provision (pre-start lifecycle hook, inside container)
+               │
+               ▼
+       provision.py (inside container)
+               │
+               ├── Claude:  reads inputs/mcp-servers.json, merges into .claude.json mcpServers
+               ├── Gemini:  reads inputs/mcp-servers.json, merges into .gemini/settings.json mcpServers
+               ├── Codex:   reads inputs/mcp-servers.json, writes to codex-native location (TBD)
+               └── Generic: reads inputs/mcp-servers.json, no-op or logs warning
 ```
 
-### Harness Interface Extension
+The critical point: **the host stages data; the container applies it.** There is no host-side Go code that writes harness-native MCP config files. The `MCPServers` map from `ScionConfig` is serialized to JSON and placed in the harness bundle as an input file, just as `telemetry.json` and `auth-candidates.json` are staged for other concerns.
 
-A new method on the `Harness` interface (or a new optional interface):
+### No Separate Go Interface Needed
 
-```go
-// MCPProvisioner is implemented by harnesses that support MCP server configuration.
-type MCPProvisioner interface {
-    ProvisionMCPServers(agentHome string, workspacePath string, servers map[string]MCPServerConfig) error
-}
-```
+The original proposal included an `MCPProvisioner` Go interface on `Harness`. This is not needed in the container-script model. The host's responsibility is only to stage `inputs/mcp-servers.json` when `ScionConfig.MCPServers` is non-empty — a straightforward addition to `ContainerScriptHarness.Provision()`. The harness-specific translation logic lives entirely in `provision.py`.
 
-Using an optional interface (rather than extending the base `Harness` interface) allows harnesses to opt-in. Harnesses that don't implement `MCPProvisioner` simply skip MCP provisioning — the template's `mcp_servers` are ignored for that harness. This should emit a warning during provisioning.
+For built-in Go harnesses (Claude, Gemini) that are not yet migrated to container-script, a temporary `MCPProvisioner` optional interface could be added during the transition period. However, given that Phases 1–5 of the decoupled harness work are already complete (OpenCode and Codex have `provision.py`), the preferred path is to implement MCP support directly in the container-script model for any harness that already has a `provision.py`.
 
 ### Capability Advertisement
 
-Extend `HarnessAdvancedCapabilities` to declare MCP support:
+MCP transport support is best declared in the harness `config.yaml` alongside other capability metadata, consistent with how Phases 1–5 moved capabilities out of Go and into declarative config:
 
-```go
-type HarnessAdvancedCapabilities struct {
-    // ... existing fields ...
-    MCP HarnessMCPCapabilities `json:"mcp"`
-}
-
-type HarnessMCPCapabilities struct {
-    Stdio          CapabilityField `json:"stdio"`
-    SSE            CapabilityField `json:"sse"`
-    StreamableHTTP CapabilityField `json:"streamable_http"`
-    ProjectScope   CapabilityField `json:"project_scope"`
-}
+```yaml
+# In harness-config config.yaml
+capabilities:
+  # ... existing limits/telemetry/prompts/auth blocks ...
+  mcp:
+    stdio: { support: yes }
+    sse: { support: partial, reason: "Depends on Claude Code version" }
+    streamable_http: { support: no }
+    project_scope: { support: yes }
 ```
 
-This allows the UI and CLI to show which MCP transports a harness supports, and to warn when a template defines MCP servers using transports the selected harness cannot handle.
+This mirrors the existing `capabilities` shape in `HarnessAdvancedCapabilities` (already YAML-tagged in Phase 1). Adding an `MCP HarnessMCPCapabilities` field to that struct allows existing capability query paths to expose MCP support without new Go logic per harness.
 
-## Integration with Decoupled Harness Implementation
+### Manifest Input Staging
 
-> **Note:** Implementation of MCP provisioning is deferred until the completion of the [Decoupled Harness Implementation](decoupled-harness-implementation.md) refactor.
+`ContainerScriptHarness.Provision()` stages the merged `MCPServers` map as `inputs/mcp-servers.json`:
 
-The decoupled harness design introduces `provision.py` scripts that handle harness-specific file manipulation. MCP server provisioning is a natural fit for this model:
-
-### New Script Command: `provision-mcp`
-
-```bash
-echo '$MANIFEST' | python3 provision.py provision-mcp
-```
-
-Manifest:
 ```json
 {
-  "command": "provision-mcp",
-  "agent_home": "/path/to/home",
-  "workspace_path": "/workspace",
-  "mcp_servers": {
-    "chrome-devtools": {
-      "transport": "stdio",
-      "command": "chrome-devtools-mcp",
-      "args": ["--headless", "--browser-url", "http://localhost:9222"],
-      "env": {},
-      "scope": "global"
-    }
+  "chrome-devtools": {
+    "transport": "stdio",
+    "command": "chrome-devtools-mcp",
+    "args": ["--headless", "--browser-url", "http://localhost:9222"],
+    "env": {},
+    "scope": "global"
   }
 }
 ```
 
-The script translates universal `MCPServerConfig` entries into the harness's native format and writes them to the appropriate file(s). For most harnesses, this is a JSON merge operation — exactly the kind of file manipulation that `provision.py` excels at.
+The manifest `inputs` block gains an `mcp_servers` entry:
+
+```json
+{
+  "inputs": {
+    "instructions": "$HOME/.scion/harness/inputs/instructions.md",
+    "system_prompt": "$HOME/.scion/harness/inputs/system-prompt.md",
+    "telemetry": "$HOME/.scion/harness/inputs/telemetry.json",
+    "auth_candidates": "$HOME/.scion/harness/inputs/auth-candidates.json",
+    "mcp_servers": "$HOME/.scion/harness/inputs/mcp-servers.json"
+  }
+}
+```
+
+Following the pattern established in Phases 4 and 5 for auth-candidates and telemetry: `provision.py` should read `mcp-servers.json` **by the well-known path** (`$HOME/.scion/harness/inputs/mcp-servers.json`) rather than from `manifest.Inputs.MCPServers`, because the manifest is written during `Provision()` but the input file is written by a separate staging call. A missing or empty file should be treated as "no MCP servers to configure" (not an error).
 
 ### Extended `config.yaml` for Declarative MCP Mapping
 
-For harnesses whose MCP config format is a straightforward mapping (which is most of them), the harness `config.yaml` can declare the mapping declaratively, eliminating the need for a custom script:
+For harnesses with a straightforward JSON-merge MCP config format (Claude, Gemini), the harness `config.yaml` can declare the mapping to eliminate boilerplate in `provision.py`:
 
 ```yaml
 # In harness-config config.yaml
 mcp:
-  config_file: .claude.json                    # File to write MCP config into
-  config_path: mcpServers                      # JSON path for global-scope servers
-  project_config_path: projects.{workspace}.mcpServers  # JSON path for project-scope
-  transport_field: type                         # Field name for transport type
-  transport_map:                                # Map scion transport names to native names
+  global_config_file: .claude.json              # File for global-scope servers
+  global_config_path: mcpServers                # JSON merge path (dot-separated)
+  project_config_file: .claude.json             # File for project-scope servers (may be same)
+  project_config_path: "projects.{workspace}.mcpServers"  # {workspace} is substituted
+  transport_field: type                         # Field name in the native server object
+  transport_map:                                # Scion transport name → native value
     stdio: stdio
     sse: sse
     streamable-http: streamable-http
 ```
 
-The `ScriptHarness` Go implementation can handle the common case (JSON merge at a known path) without invoking `provision.py` at all. Only harnesses with exotic config formats need a custom `provision-mcp` script handler.
+The shipped `scion_harness.py` helper module (Phase 7) should include an `apply_mcp_servers(config, mcp_servers_path)` function that reads this declarative mapping and performs the merge, so harness `provision.py` scripts can handle MCP in a few lines rather than reimplementing JSON merge logic per harness.
 
-### Migration Path
+## Integration with Decoupled Harness Implementation
 
-1. **Phase 1 (now):** Define the `MCPServerConfig` type and add `mcp_servers` to `ScionConfig`. Add validation. No provisioning yet — the field is parsed and stored but not acted upon.
-2. **Phase 2 (decoupled harness):** Implement `provision-mcp` in the `ScriptHarness` and add the `MCPProvisioner` interface. Migrate existing harnesses.
-3. **Phase 3 (cleanup):** Remove inline MCP config from harness-config home files in templates. Templates use `mcp_servers` exclusively.
+> **Note:** The [Decoupled Harness Implementation](decoupled-harness-implementation.md) has an initial implementation through Phase 5 (OpenCode and Codex migrated to container-script, Phases 1–5 complete as of 2026-04-26). MCP provisioning implementation is deferred until this work is considered stable enough to extend (Phase 6 or Phase 7 scope).
+
+### What Changed from the Original Design
+
+The original section above was drafted before the decoupled harness implementation was built. Several assumptions in that draft are now superseded:
+
+| Original assumption | Actual implementation |
+|---|---|
+| Scripts execute on the host during provisioning | Scripts execute **inside the container** via `sciontool harness provision` in a `pre-start` lifecycle hook |
+| A separate `provision-mcp` command in the manifest | No sub-command routing — `provision` handles everything; MCP config is an input file |
+| `MCPProvisioner` Go interface required | Not needed — staging + `provision.py` replaces it entirely |
+| `ScriptHarness` reads config and may skip the script for simple merges | `ContainerScriptHarness` always stages; the script (or a helper function) handles the merge inside the container |
+| Host Python dependency was a concern | Not applicable — scripts only run inside harness container images, which already ship Python |
+
+### Implementation Path (Updated)
+
+The schema work (defining `MCPServerConfig`, adding `mcp_servers` to `ScionConfig`, validation) can proceed independently at any time.
+
+Provisioning implementation should be sequenced with the decoupled harness work:
+
+1. **Schema only (can proceed now):** Add `MCPServerConfig` type, `mcp_servers` to `ScionConfig`, validation rules, and `mcp` capabilities block to `HarnessAdvancedCapabilities`. No staging, no provisioning. The field is parsed and stored.
+2. **Staging (after Phase 5 is stable):** Add `mcp-servers.json` staging to `ContainerScriptHarness.Provision()`. Add `mcp_servers` input path to the manifest. No harness scripts yet — staging is a no-op from the harness's perspective.
+3. **Helper module (Phase 7):** Include `apply_mcp_servers()` in `scion_harness.py`. Document the declarative `mcp:` block in `config.yaml`.
+4. **Per-harness implementation:** As each harness's `provision.py` is written or updated (Claude, Gemini in Phase 6; community harnesses in Phase 7), add MCP server application using the helper. Update harness `config.yaml` with `capabilities.mcp` and `mcp` declarative mapping.
+5. **Template cleanup:** Remove inline `mcpServers` from harness-config home files in templates. Templates use `mcp_servers` in `scion-agent.yaml` exclusively.
 
 ## Impact on Existing Templates
 
