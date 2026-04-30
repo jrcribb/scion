@@ -179,7 +179,7 @@ func (e *PullImagesExecutor) Run(ctx context.Context, logger io.Writer, params m
 
 	harnesses := e.harnesses
 	if len(harnesses) == 0 {
-		harnesses = []string{"claude", "gemini"}
+		harnesses = []string{"claude", "gemini", "opencode", "codex"}
 	}
 
 	log.Debug("Starting pull-images",
