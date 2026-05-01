@@ -244,6 +244,11 @@ func (h *StatusHandler) writeAgentInfoLocked(info map[string]interface{}) error 
 	}
 	tmpFile.Close()
 
+	// CreateTemp uses mode 0600. Widen to 0644 so the broker process
+	// (which may run as a different uid than the container init) can
+	// read and converge the file after the container exits.
+	os.Chmod(tmpPath, 0644) //nolint:errcheck
+
 	if err := os.Rename(tmpPath, h.StatusPath); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("atomic rename: %w", err)
