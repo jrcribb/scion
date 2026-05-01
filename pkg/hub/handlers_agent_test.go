@@ -4117,6 +4117,95 @@ func TestCreateAgent_GCPPassthrough_AdminAllowed(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rec.Code)
 }
 
+func TestCreateAgent_GCPIdentityBlockOverridesGroveDefault(t *testing.T) {
+	disp := &createAgentDispatcher{createPhase: string(state.PhaseRunning)}
+	srv, s, grove := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	// Register and verify a GCP service account
+	sa := &store.GCPServiceAccount{
+		ID:         "sa-grove-default",
+		Scope:      store.ScopeGrove,
+		ScopeID:    grove.ID,
+		Email:      "grove-default@project.iam.gserviceaccount.com",
+		ProjectID:  "my-project",
+		Verified:   true,
+		VerifiedAt: time.Now(),
+		CreatedBy:  "user-1",
+		CreatedAt:  time.Now(),
+	}
+	require.NoError(t, s.CreateGCPServiceAccount(ctx, sa))
+
+	// Set grove defaults to assign the service account
+	grove.Annotations = map[string]string{
+		"scion.io/default-gcp-identity-mode":               "assign",
+		"scion.io/default-gcp-identity-service-account-id": sa.ID,
+	}
+	require.NoError(t, s.UpdateGrove(ctx, grove))
+
+	// Create agent with explicit "block" — should override grove default
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "gcp-block-override-agent",
+		GroveID: grove.ID,
+		Task:    "do something",
+		GCPIdentity: &GCPIdentityAssignment{
+			MetadataMode: "block",
+		},
+	})
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent.AppliedConfig.GCPIdentity)
+	assert.Equal(t, store.GCPMetadataModeBlock, resp.Agent.AppliedConfig.GCPIdentity.MetadataMode,
+		"explicit block should override grove default assign")
+	assert.Empty(t, resp.Agent.AppliedConfig.GCPIdentity.ServiceAccountID,
+		"no service account should be assigned when block is explicit")
+}
+
+func TestCreateAgent_GCPIdentityGroveDefaultApplied(t *testing.T) {
+	disp := &createAgentDispatcher{createPhase: string(state.PhaseRunning)}
+	srv, s, grove := setupCreateAgentServer(t, disp)
+	ctx := context.Background()
+
+	// Register and verify a GCP service account
+	sa := &store.GCPServiceAccount{
+		ID:         "sa-grove-applied",
+		Scope:      store.ScopeGrove,
+		ScopeID:    grove.ID,
+		Email:      "grove-applied@project.iam.gserviceaccount.com",
+		ProjectID:  "my-project",
+		Verified:   true,
+		VerifiedAt: time.Now(),
+		CreatedBy:  "user-1",
+		CreatedAt:  time.Now(),
+	}
+	require.NoError(t, s.CreateGCPServiceAccount(ctx, sa))
+
+	// Set grove defaults to assign the service account
+	grove.Annotations = map[string]string{
+		"scion.io/default-gcp-identity-mode":               "assign",
+		"scion.io/default-gcp-identity-service-account-id": sa.ID,
+	}
+	require.NoError(t, s.UpdateGrove(ctx, grove))
+
+	// Create agent WITHOUT GCP identity — grove default should apply
+	rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", CreateAgentRequest{
+		Name:    "gcp-grove-default-agent",
+		GroveID: grove.ID,
+		Task:    "do something",
+	})
+	require.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp CreateAgentResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotNil(t, resp.Agent.AppliedConfig.GCPIdentity)
+	assert.Equal(t, store.GCPMetadataModeAssign, resp.Agent.AppliedConfig.GCPIdentity.MetadataMode,
+		"grove default assign should be applied when no GCP identity specified")
+	assert.Equal(t, sa.ID, resp.Agent.AppliedConfig.GCPIdentity.ServiceAccountID)
+	assert.Equal(t, sa.Email, resp.Agent.AppliedConfig.GCPIdentity.ServiceAccountEmail)
+}
+
 func TestPreserveTerminalPhase(t *testing.T) {
 	srv, s := testServer(t)
 	ctx := context.Background()

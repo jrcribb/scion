@@ -511,6 +511,10 @@ export class ScionPageAgentCreate extends LitElement {
         body.gcp_identity = {
           metadata_mode: 'passthrough',
         };
+      } else if (this.gcpMetadataMode === 'block') {
+        body.gcp_identity = {
+          metadata_mode: 'block',
+        };
       }
 
       // Pass config options
@@ -638,6 +642,10 @@ export class ScionPageAgentCreate extends LitElement {
       } else if (this.gcpMetadataMode === 'passthrough') {
         body.gcp_identity = {
           metadata_mode: 'passthrough',
+        };
+      } else if (this.gcpMetadataMode === 'block') {
+        body.gcp_identity = {
+          metadata_mode: 'block',
         };
       }
 
