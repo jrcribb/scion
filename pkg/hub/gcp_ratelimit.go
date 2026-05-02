@@ -15,6 +15,7 @@
 package hub
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -34,15 +35,20 @@ type tokenBucket struct {
 }
 
 // NewGCPTokenRateLimiter creates a rate limiter with the given rate (tokens/sec) and burst size.
+// Call StartCleanup to begin the background cleanup goroutine.
 func NewGCPTokenRateLimiter(ratePerSecond float64, burst int) *GCPTokenRateLimiter {
-	rl := &GCPTokenRateLimiter{
+	return &GCPTokenRateLimiter{
 		limiters: make(map[string]*tokenBucket),
 		rate:     ratePerSecond,
 		burst:    burst,
 		cleanup:  10 * time.Minute,
 	}
-	go rl.cleanupLoop()
-	return rl
+}
+
+// StartCleanup starts the background goroutine that removes stale entries.
+// It exits when ctx is cancelled.
+func (rl *GCPTokenRateLimiter) StartCleanup(ctx context.Context) {
+	go rl.cleanupLoop(ctx)
 }
 
 // Allow returns true if the request is allowed for the given agent ID.
@@ -76,17 +82,22 @@ func (rl *GCPTokenRateLimiter) Allow(agentID string) bool {
 	return false
 }
 
-func (rl *GCPTokenRateLimiter) cleanupLoop() {
+func (rl *GCPTokenRateLimiter) cleanupLoop(ctx context.Context) {
 	ticker := time.NewTicker(rl.cleanup)
 	defer ticker.Stop()
-	for range ticker.C {
-		rl.mu.Lock()
-		cutoff := time.Now().Add(-30 * time.Minute)
-		for id, b := range rl.limiters {
-			if b.lastCheck.Before(cutoff) {
-				delete(rl.limiters, id)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			cutoff := time.Now().Add(-30 * time.Minute)
+			for id, b := range rl.limiters {
+				if b.lastCheck.Before(cutoff) {
+					delete(rl.limiters, id)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }

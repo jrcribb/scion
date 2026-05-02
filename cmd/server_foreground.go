@@ -817,7 +817,7 @@ func initHubServer(ctx context.Context, cfg *config.GlobalConfig, s store.Store,
 	if gcpErr != nil {
 		log.Printf("GCP token generator not available (agent GCP identity disabled): %v", gcpErr)
 	} else {
-		hubSrv.SetGCPTokenGenerator(gcpGen)
+		hubSrv.SetGCPTokenGenerator(hub.NewCachedGCPTokenGenerator(gcpGen))
 		saEmail := gcpGen.ServiceAccountEmail()
 		if saEmail != "" {
 			log.Printf("GCP token generator configured (hub SA: %s)", saEmail)

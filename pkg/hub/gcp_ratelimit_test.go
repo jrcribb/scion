@@ -15,6 +15,7 @@
 package hub
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -56,5 +57,25 @@ func TestGCPTokenRateLimiter_Refill(t *testing.T) {
 
 	if !rl.Allow("agent-1") {
 		t.Fatal("request after refill should be allowed")
+	}
+}
+
+func TestGCPTokenRateLimiter_CleanupExitsOnCancel(t *testing.T) {
+	rl := NewGCPTokenRateLimiter(10, 5)
+	rl.cleanup = 50 * time.Millisecond // fast cleanup for test
+
+	ctx, cancel := context.WithCancel(context.Background())
+	rl.StartCleanup(ctx)
+
+	// Use the limiter
+	rl.Allow("agent-1")
+
+	// Cancel and verify goroutine exits (no hang)
+	cancel()
+	time.Sleep(100 * time.Millisecond)
+
+	// Limiter should still work after cleanup goroutine exits
+	if !rl.Allow("agent-2") {
+		t.Fatal("limiter should still work after cleanup exits")
 	}
 }

@@ -1835,6 +1835,11 @@ func (s *Server) StartBackgroundServices(ctx context.Context) {
 
 	s.scheduler.Start(ctx)
 
+	// Start rate limiter cleanup goroutine (exits when ctx is cancelled).
+	if s.gcpTokenRateLimiter != nil {
+		s.gcpTokenRateLimiter.StartCleanup(ctx)
+	}
+
 	// Start notification dispatcher (uses the current event publisher).
 	// The dispatcher is resolved lazily so it works even if SetDispatcher
 	// is called after Start().

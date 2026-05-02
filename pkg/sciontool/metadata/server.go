@@ -52,6 +52,10 @@ type Config struct {
 	// This allows the metadata server to pick up refreshed tokens.
 	// If nil, the static AuthToken field is used.
 	TokenFunc func() string
+	// NetworkMode is the container network mode (e.g. "host").
+	// When "host", iptables interception is skipped to avoid leaking
+	// redirect rules into the host's network namespace.
+	NetworkMode string
 }
 
 const (
@@ -78,12 +82,13 @@ func ConfigFromEnv() *Config {
 	}
 
 	return &Config{
-		Mode:      mode,
-		Port:      port,
-		SAEmail:   os.Getenv("SCION_METADATA_SA_EMAIL"),
-		ProjectID: os.Getenv("SCION_METADATA_PROJECT_ID"),
-		HubURL:    hubURL,
-		AuthToken: os.Getenv("SCION_AUTH_TOKEN"),
+		Mode:        mode,
+		Port:        port,
+		SAEmail:     os.Getenv("SCION_METADATA_SA_EMAIL"),
+		ProjectID:   os.Getenv("SCION_METADATA_PROJECT_ID"),
+		HubURL:      hubURL,
+		AuthToken:   os.Getenv("SCION_AUTH_TOKEN"),
+		NetworkMode: os.Getenv("SCION_NETWORK_MODE"),
 	}
 }
 
@@ -100,10 +105,18 @@ type Server struct {
 	idTokenMu      sync.RWMutex
 	cachedIDTokens map[string]*cachedIDToken
 
-	// Singleflight for token fetches
+	// Singleflight for access token fetches
 	fetchMu       sync.Mutex
 	fetchInFlight bool
 	fetchDone     chan struct{}
+	fetchErr      error
+
+	// Singleflight for identity token fetches
+	idFetchMu       sync.Mutex
+	idFetchInFlight bool
+	idFetchDone     chan struct{}
+	idFetchErr      error
+	idFetchAudience string
 
 	cancel             context.CancelFunc
 	iptablesConfigured bool        // whether iptables redirect was successfully set up
@@ -136,7 +149,7 @@ type cachedIDToken struct {
 func New(cfg Config) *Server {
 	return &Server{
 		config:         cfg,
-		client:         &http.Client{Timeout: 30 * time.Second},
+		client:         &http.Client{Timeout: 10 * time.Second},
 		cachedIDTokens: make(map[string]*cachedIDToken),
 	}
 }
@@ -204,13 +217,20 @@ func (s *Server) Start(ctx context.Context) error {
 	return nil
 }
 
-func shouldAttemptMetadataInterception(uid int) bool {
+func shouldAttemptMetadataInterception(uid int, networkMode string) bool {
+	if networkMode == "host" {
+		return false
+	}
 	return uid == 0
 }
 
 func (s *Server) configureMetadataInterception(uid int) {
-	if !shouldAttemptMetadataInterception(uid) {
-		log.Debug("Skipping metadata IP interception: process is not running as root")
+	if !shouldAttemptMetadataInterception(uid, s.config.NetworkMode) {
+		if s.config.NetworkMode == "host" {
+			log.Debug("Skipping metadata IP interception: host networking mode (iptables would leak to host namespace)")
+		} else {
+			log.Debug("Skipping metadata IP interception: process is not running as root")
+		}
 		return
 	}
 
@@ -384,28 +404,57 @@ func (s *Server) handleServiceAccount(w http.ResponseWriter, r *http.Request, pa
 	}
 }
 
-func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
-	// Check cache
+func (s *Server) serveCachedToken(w http.ResponseWriter) bool {
 	s.mu.RLock()
 	cached := s.cachedToken
 	s.mu.RUnlock()
 
-	if cached != nil {
-		elapsed := time.Since(cached.FetchedAt)
-		remaining := time.Duration(cached.ExpiresIn)*time.Second - elapsed
-		if remaining > 60*time.Second {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"access_token": cached.AccessToken,
-				"expires_in":   int(remaining.Seconds()),
-				"token_type":   cached.TokenType,
-			})
-			return
-		}
+	if cached == nil {
+		return false
+	}
+	elapsed := time.Since(cached.FetchedAt)
+	remaining := time.Duration(cached.ExpiresIn)*time.Second - elapsed
+	if remaining <= 60*time.Second {
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"access_token": cached.AccessToken,
+		"expires_in":   int(remaining.Seconds()),
+		"token_type":   cached.TokenType,
+	})
+	return true
+}
+
+func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
+	if s.serveCachedToken(w) {
+		return
 	}
 
-	// Fetch from Hub
+	// Singleflight: collapse concurrent fetches into one Hub request
+	s.fetchMu.Lock()
+	if s.fetchInFlight {
+		done := s.fetchDone
+		s.fetchMu.Unlock()
+		<-done
+		if s.serveCachedToken(w) {
+			return
+		}
+		http.Error(w, "token generation failed", http.StatusBadGateway)
+		return
+	}
+	s.fetchInFlight = true
+	s.fetchDone = make(chan struct{})
+	s.fetchMu.Unlock()
+
 	token, err := s.fetchAccessToken(r.Context())
+
+	s.fetchMu.Lock()
+	s.fetchInFlight = false
+	s.fetchErr = err
+	close(s.fetchDone)
+	s.fetchMu.Unlock()
+
 	if err != nil {
 		log.Error("Failed to fetch GCP access token from Hub: %v", err)
 		http.Error(w, "token generation failed", http.StatusBadGateway)
@@ -416,6 +465,19 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(token)
 }
 
+func (s *Server) serveCachedIDToken(w http.ResponseWriter, audience string) bool {
+	s.idTokenMu.RLock()
+	cached := s.cachedIDTokens[audience]
+	s.idTokenMu.RUnlock()
+
+	if cached == nil || !time.Now().Before(cached.ExpiresAt.Add(-60*time.Second)) {
+		return false
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprint(w, cached.Token)
+	return true
+}
+
 func (s *Server) handleIdentityToken(w http.ResponseWriter, r *http.Request) {
 	audience := r.URL.Query().Get("audience")
 	if audience == "" {
@@ -423,18 +485,35 @@ func (s *Server) handleIdentityToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check cache
-	s.idTokenMu.RLock()
-	cached := s.cachedIDTokens[audience]
-	s.idTokenMu.RUnlock()
-
-	if cached != nil && time.Now().Before(cached.ExpiresAt.Add(-60*time.Second)) {
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprint(w, cached.Token)
+	if s.serveCachedIDToken(w, audience) {
 		return
 	}
 
+	// Singleflight: collapse concurrent fetches for the same audience
+	s.idFetchMu.Lock()
+	if s.idFetchInFlight && s.idFetchAudience == audience {
+		done := s.idFetchDone
+		s.idFetchMu.Unlock()
+		<-done
+		if s.serveCachedIDToken(w, audience) {
+			return
+		}
+		http.Error(w, "identity token generation failed", http.StatusBadGateway)
+		return
+	}
+	s.idFetchInFlight = true
+	s.idFetchAudience = audience
+	s.idFetchDone = make(chan struct{})
+	s.idFetchMu.Unlock()
+
 	token, err := s.fetchIdentityToken(r.Context(), audience)
+
+	s.idFetchMu.Lock()
+	s.idFetchInFlight = false
+	s.idFetchErr = err
+	close(s.idFetchDone)
+	s.idFetchMu.Unlock()
+
 	if err != nil {
 		log.Error("Failed to fetch GCP identity token from Hub: %v", err)
 		http.Error(w, "identity token generation failed", http.StatusBadGateway)
@@ -553,7 +632,7 @@ func (s *Server) proactiveRefreshLoop(ctx context.Context) {
 			remaining := time.Duration(cached.ExpiresIn)*time.Second - elapsed
 			if remaining < 300*time.Second {
 				log.Debug("Proactively refreshing GCP access token (remaining: %v)", remaining)
-				refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 				if _, err := s.fetchAccessToken(refreshCtx); err != nil {
 					log.Error("Proactive token refresh failed: %v", err)
 				}

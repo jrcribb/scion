@@ -22,6 +22,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -39,18 +41,21 @@ func freePort(t *testing.T) int {
 
 func TestShouldAttemptMetadataInterception(t *testing.T) {
 	tests := []struct {
-		name string
-		uid  int
-		want bool
+		name        string
+		uid         int
+		networkMode string
+		want        bool
 	}{
-		{name: "root", uid: 0, want: true},
-		{name: "non-root", uid: 1000, want: false},
+		{name: "root", uid: 0, networkMode: "", want: true},
+		{name: "non-root", uid: 1000, networkMode: "", want: false},
+		{name: "root-host-network", uid: 0, networkMode: "host", want: false},
+		{name: "non-root-host-network", uid: 1000, networkMode: "host", want: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldAttemptMetadataInterception(tt.uid); got != tt.want {
-				t.Fatalf("shouldAttemptMetadataInterception(%d) = %v, want %v", tt.uid, got, tt.want)
+			if got := shouldAttemptMetadataInterception(tt.uid, tt.networkMode); got != tt.want {
+				t.Fatalf("shouldAttemptMetadataInterception(%d, %q) = %v, want %v", tt.uid, tt.networkMode, got, tt.want)
 			}
 		})
 	}
@@ -534,5 +539,64 @@ func TestMetadataServer_IdentityToken_RequiresAudience(t *testing.T) {
 	resp, _ := metadataGet(t, port, "/computeMetadata/v1/instance/service-accounts/default/identity")
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 without audience, got %d", resp.StatusCode)
+	}
+}
+
+func TestMetadataServer_AssignMode_SingleflightToken(t *testing.T) {
+	var requestCount int64
+	hubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&requestCount, 1)
+		time.Sleep(200 * time.Millisecond) // simulate slow Hub
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "ya29.singleflight-token",
+			"expires_in":   3599,
+			"token_type":   "Bearer",
+		})
+	}))
+	defer hubServer.Close()
+
+	port := freePort(t)
+	srv := New(Config{
+		Mode:      "assign",
+		Port:      port,
+		SAEmail:   "test@project.iam.gserviceaccount.com",
+		ProjectID: "test-project",
+		HubURL:    hubServer.URL,
+		AuthToken: "test-token",
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := srv.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	// Launch 10 concurrent token requests
+	const concurrency = 10
+	var wg sync.WaitGroup
+	results := make([]int, concurrency)
+	for i := range concurrency {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			resp, _ := metadataGet(t, port, "/computeMetadata/v1/instance/service-accounts/default/token")
+			results[idx] = resp.StatusCode
+		}(i)
+	}
+	wg.Wait()
+
+	for i, code := range results {
+		if code != http.StatusOK {
+			t.Fatalf("request %d: expected 200, got %d", i, code)
+		}
+	}
+
+	// Singleflight should collapse all concurrent requests into 1 Hub call
+	count := atomic.LoadInt64(&requestCount)
+	if count != 1 {
+		t.Fatalf("expected 1 Hub request (singleflight), got %d", count)
 	}
 }
