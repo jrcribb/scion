@@ -73,14 +73,22 @@ echo "=== Scion Demo Provisioning ==="
 
 # Enable required APIs
 echo "Enabling required Google Cloud APIs..."
-gcloud services enable \
-    cloudtrace.googleapis.com \
-    monitoring.googleapis.com \
-    logging.googleapis.com \
-    iam.googleapis.com \
-    iamcredentials.googleapis.com \
-    secretmanager.googleapis.com \
-    --project "${PROJECT_ID}"
+APIS_TO_ENABLE=(
+    serviceusage.googleapis.com
+    compute.googleapis.com
+    cloudtrace.googleapis.com
+    monitoring.googleapis.com
+    logging.googleapis.com
+    iam.googleapis.com
+    iamcredentials.googleapis.com
+    secretmanager.googleapis.com
+    dns.googleapis.com
+)
+if [[ "${ENABLE_GKE}" == "true" ]]; then
+    APIS_TO_ENABLE+=(container.googleapis.com)
+fi
+
+gcloud services enable "${APIS_TO_ENABLE[@]}" --project "${PROJECT_ID}"
 
 # Check if instance already exists
 INSTANCE_EXISTS=false

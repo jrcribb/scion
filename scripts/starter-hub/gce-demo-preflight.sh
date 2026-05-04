@@ -151,8 +151,11 @@ else
     REQUIRED_VARS=(
         SCION_HUB_STORAGE_BUCKET
         SESSION_SECRET
-        SCION_HUB_ENDPOINT
+        SCION_SERVER_BASE_URL
         SCION_IMAGE_REGISTRY
+    )
+
+    OAUTH_VARS=(
         SCION_SERVER_OAUTH_WEB_GOOGLE_CLIENTID
         SCION_SERVER_OAUTH_WEB_GOOGLE_CLIENTSECRET
         SCION_SERVER_OAUTH_WEB_GITHUB_CLIENTID
@@ -161,6 +164,10 @@ else
         SCION_SERVER_OAUTH_CLI_GOOGLE_CLIENTSECRET
         SCION_SERVER_OAUTH_CLI_GITHUB_CLIENTID
         SCION_SERVER_OAUTH_CLI_GITHUB_CLIENTSECRET
+        SCION_HUB_ENDPOINT
+    )
+
+    PROJECT_VARS=(
         SCION_GCP_PROJECT_ID
         GOOGLE_CLOUD_PROJECT
     )
@@ -178,8 +185,26 @@ else
         fi
     done
 
+    for var in "${OAUTH_VARS[@]}"; do
+        val=$(get_env_value "$var" "${HUB_ENV_FILE}")
+        if is_placeholder "$val"; then
+            check_warn "${var} is missing or still a placeholder (authentication will be disabled for this provider)"
+        else
+            check_pass "${var}"
+        fi
+    done
+
+    for var in "${PROJECT_VARS[@]}"; do
+        val=$(get_env_value "$var" "${HUB_ENV_FILE}")
+        if is_placeholder "$val"; then
+            check_warn "${var} is missing or still a placeholder (telemetry may be disabled)"
+        else
+            check_pass "${var}"
+        fi
+    done
+
     # Optional vars — warn if missing
-    for var in SCION_AUTHORIZED_DOMAINS SCION_SERVER_HUB_ADMINEMAILS; do
+    for var in SCION_SERVER_AUTH_AUTHORIZEDDOMAINS SCION_SERVER_HUB_ADMINEMAILS; do
         val=$(get_env_value "$var" "${HUB_ENV_FILE}")
         if [[ -z "$val" ]]; then
             check_warn "${var} is not set (optional — see hub.env.sample)"
@@ -195,27 +220,46 @@ fi
 section "GCP APIs"
 
 if [[ -n "$PROJECT_ID" ]]; then
-    ENABLED_APIS=$(gcloud services list --enabled --project "${PROJECT_ID}" --format="value(name)" 2>/dev/null || true)
+    # Get enabled services as a clean list of IDs.
+    ENABLED_APIS=$(gcloud services list --enabled --project "${PROJECT_ID}" --format="value(config.name)" 2>/dev/null || true)
 
-    REQUIRED_APIS=(
+    # Critical APIs required for the infrastructure provisioning itself.
+    # Failure to have these enabled often indicates a permissions issue or 
+    # an uninitialized project.
+    CRITICAL_APIS=(
+        compute.googleapis.com
+        iam.googleapis.com
+        iamcredentials.googleapis.com
+        serviceusage.googleapis.com
+    )
+    
+    # Application-level APIs that the provisioning script will attempt to enable.
+    # We warn if missing so the user is aware of what will be activated.
+    PROVISIONABLE_APIS=(
         cloudtrace.googleapis.com
         monitoring.googleapis.com
         logging.googleapis.com
-        iam.googleapis.com
-        iamcredentials.googleapis.com
         secretmanager.googleapis.com
         dns.googleapis.com
     )
     if [[ "${ENABLE_GKE}" == "true" ]]; then
-        REQUIRED_APIS+=(container.googleapis.com)
+        PROVISIONABLE_APIS+=(container.googleapis.com)
     fi
 
-    for api in "${REQUIRED_APIS[@]}"; do
-        if echo "${ENABLED_APIS}" | grep -q "^${api}$"; then
+    for api in "${CRITICAL_APIS[@]}"; do
+        if echo "${ENABLED_APIS}" | grep -Fqx "${api}" >/dev/null; then
             check_pass "${api}"
         else
             check_fail "${api} is not enabled" \
                 "gcloud services enable ${api} --project ${PROJECT_ID}"
+        fi
+    done
+
+    for api in "${PROVISIONABLE_APIS[@]}"; do
+        if echo "${ENABLED_APIS}" | grep -Fqx "${api}" >/dev/null; then
+            check_pass "${api}"
+        else
+            check_warn "${api} is not enabled (gce-demo-provision.sh will attempt to enable it)"
         fi
     done
 else
@@ -229,33 +273,29 @@ section "GCP IAM Permissions"
 
 if [[ -n "$PROJECT_ID" ]] && [[ -n "$ACTIVE_ACCOUNT" ]]; then
     # Probe with lightweight read-only commands
-    if gcloud compute instances list --project "${PROJECT_ID}" --limit=0 &>/dev/null; then
+    if gcloud compute instances list --project "${PROJECT_ID}" --limit=1 &>/dev/null; then
         check_pass "Compute Engine access"
     else
-        check_fail "No Compute Engine access" \
-            "Grant roles/compute.admin to ${ACTIVE_ACCOUNT} on project ${PROJECT_ID}"
+        check_warn "Could not verify Compute Engine access (may be missing roles/compute.admin or API is disabled)"
     fi
 
-    if gcloud iam service-accounts list --project "${PROJECT_ID}" --limit=0 &>/dev/null; then
+    if gcloud iam service-accounts list --project "${PROJECT_ID}" --limit=1 &>/dev/null; then
         check_pass "IAM service account access"
     else
-        check_fail "No IAM access" \
-            "Grant roles/iam.admin to ${ACTIVE_ACCOUNT} on project ${PROJECT_ID}"
+        check_warn "Could not verify IAM access (may be missing roles/iam.admin)"
     fi
 
-    if gcloud dns managed-zones list --project "${PROJECT_ID}" --limit=0 &>/dev/null; then
+    if gcloud dns managed-zones list --project "${PROJECT_ID}" --limit=1 &>/dev/null; then
         check_pass "Cloud DNS access"
     else
-        check_fail "No Cloud DNS access" \
-            "Grant roles/dns.admin to ${ACTIVE_ACCOUNT} on project ${PROJECT_ID}"
+        check_warn "Could not verify Cloud DNS access (may be missing roles/dns.admin)"
     fi
 
     if [[ "${ENABLE_GKE}" == "true" ]]; then
-        if gcloud container clusters list --project "${PROJECT_ID}" --limit=0 &>/dev/null; then
+        if gcloud container clusters list --project "${PROJECT_ID}" --limit=1 &>/dev/null; then
             check_pass "GKE access"
         else
-            check_fail "No GKE access" \
-                "Grant roles/container.admin to ${ACTIVE_ACCOUNT} on project ${PROJECT_ID}"
+            check_warn "Could not verify GKE access (may be missing roles/container.admin)"
         fi
     fi
 else
