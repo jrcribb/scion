@@ -232,6 +232,7 @@ func detectContainerRuntime() string {
 // RebuildServerExecutor rebuilds the server binary from git and restarts via systemd.
 type RebuildServerExecutor struct {
 	repoPath    string // path to scion source checkout
+	repoBranch  string // git branch to checkout before building (empty = stay on current)
 	binaryDest  string // install path (e.g., /usr/local/bin/scion)
 	serviceName string // systemd service name (e.g., "scion-hub")
 }
@@ -256,8 +257,15 @@ func (e *RebuildServerExecutor) Run(ctx context.Context, logger io.Writer, param
 		serviceName = "scion-hub"
 	}
 
+	// A "branch" param on the API request overrides the configured default.
+	branch := e.repoBranch
+	if v := params["branch"]; v != "" {
+		branch = v
+	}
+
 	log.Debug("Starting rebuild-server",
-		"repo_path", repoPath, "binary_dest", binaryDest, "service_name", serviceName)
+		"repo_path", repoPath, "branch", branch,
+		"binary_dest", binaryDest, "service_name", serviceName)
 
 	// Build to a staging path inside the repo directory (where the service user
 	// has write access), then use "sudo install" to place it into the final
@@ -269,17 +277,26 @@ func (e *RebuildServerExecutor) Run(ctx context.Context, logger io.Writer, param
 	// sudoers rules installed by the deploy script (gce-start-hub.sh).
 	stagingBinary := filepath.Join(repoPath, "scion.rebuild")
 
-	steps := []struct {
+	type step struct {
 		name string
 		cmd  string
 		args []string
 		dir  string
-	}{
-		{"Pulling latest code", "git", []string{"pull"}, repoPath},
-		{"Building web assets", "make", []string{"web"}, repoPath},
-		{"Building server binary", "go", []string{"build", "-o", stagingBinary, "./cmd/scion"}, repoPath},
-		{"Installing server binary", "sudo", []string{"install", "-m", "755", stagingBinary, binaryDest}, ""},
 	}
+
+	var steps []step
+	steps = append(steps, step{"Fetching latest code", "git", []string{"fetch", "origin"}, repoPath})
+	if branch != "" {
+		steps = append(steps, step{"Checking out branch " + branch, "git", []string{"checkout", branch}, repoPath})
+		steps = append(steps, step{"Pulling latest code", "git", []string{"pull", "origin", branch}, repoPath})
+	} else {
+		steps = append(steps, step{"Pulling latest code", "git", []string{"pull"}, repoPath})
+	}
+	steps = append(steps,
+		step{"Building web assets", "make", []string{"web"}, repoPath},
+		step{"Building server binary", "go", []string{"build", "-o", stagingBinary, "./cmd/scion"}, repoPath},
+		step{"Installing server binary", "sudo", []string{"install", "-m", "755", stagingBinary, binaryDest}, ""},
+	)
 
 	for i, step := range steps {
 		fmt.Fprintf(logger, "==> %s\n", step.name)
@@ -325,7 +342,8 @@ func (e *RebuildServerExecutor) Run(ctx context.Context, logger io.Writer, param
 
 // RebuildWebExecutor rebuilds the web frontend assets from source.
 type RebuildWebExecutor struct {
-	repoPath string // path to scion source checkout
+	repoPath   string // path to scion source checkout
+	repoBranch string // git branch to checkout before building (empty = stay on current)
 }
 
 func (e *RebuildWebExecutor) Run(ctx context.Context, logger io.Writer, params map[string]string) error {
@@ -336,16 +354,28 @@ func (e *RebuildWebExecutor) Run(ctx context.Context, logger io.Writer, params m
 		return fmt.Errorf("no repository path configured for rebuild-web")
 	}
 
-	log.Debug("Starting rebuild-web", "repo_path", repoPath)
+	branch := e.repoBranch
+	if v := params["branch"]; v != "" {
+		branch = v
+	}
 
-	steps := []struct {
+	log.Debug("Starting rebuild-web", "repo_path", repoPath, "branch", branch)
+
+	type step struct {
 		name string
 		cmd  string
 		args []string
-	}{
-		{"Pulling latest code", "git", []string{"pull"}},
-		{"Building web assets", "make", []string{"web"}},
 	}
+
+	var steps []step
+	steps = append(steps, step{"Fetching latest code", "git", []string{"fetch", "origin"}})
+	if branch != "" {
+		steps = append(steps, step{"Checking out branch " + branch, "git", []string{"checkout", branch}})
+		steps = append(steps, step{"Pulling latest code", "git", []string{"pull", "origin", branch}})
+	} else {
+		steps = append(steps, step{"Pulling latest code", "git", []string{"pull"}})
+	}
+	steps = append(steps, step{"Building web assets", "make", []string{"web"}})
 
 	for i, step := range steps {
 		fmt.Fprintf(logger, "==> %s\n", step.name)
@@ -375,6 +405,8 @@ type UpdateCheckResult struct {
 	UpdateAvailable bool               `json:"update_available"`
 	CurrentCommit   string             `json:"current_commit"`
 	LatestCommit    string             `json:"latest_commit"`
+	CurrentBranch   string             `json:"current_branch"`
+	TrackingRef     string             `json:"tracking_ref"`
 	CommitsBehind   int                `json:"commits_behind"`
 	NewCommits      []UpdateCommitInfo `json:"new_commits,omitempty"`
 }
@@ -386,7 +418,8 @@ type UpdateCommitInfo struct {
 }
 
 // CheckForUpdates fetches the remote and compares the local HEAD against
-// origin/main to determine whether a newer version is available.
+// the current branch's remote tracking ref to determine whether a newer
+// version is available.
 func CheckForUpdates(ctx context.Context, repoPath string) (*UpdateCheckResult, error) {
 	log := logging.Subsystem("hub.maintenance.check-updates")
 
@@ -404,6 +437,18 @@ func CheckForUpdates(ctx context.Context, repoPath string) (*UpdateCheckResult, 
 		return nil, fmt.Errorf("git fetch failed: %w", err)
 	}
 
+	// Detect the current branch.
+	branchCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd.Dir = repoPath
+	branchOut, err := branchCmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current branch: %w", err)
+	}
+	currentBranch := strings.TrimSpace(string(branchOut))
+
+	// Resolve the remote tracking ref (e.g., "origin/main" or "origin/feature-branch").
+	trackingRef := "origin/" + currentBranch
+
 	// Get local HEAD commit.
 	localCmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
 	localCmd.Dir = repoPath
@@ -413,18 +458,20 @@ func CheckForUpdates(ctx context.Context, repoPath string) (*UpdateCheckResult, 
 	}
 	localCommit := strings.TrimSpace(string(localOut))
 
-	// Get remote HEAD commit (origin/main).
-	remoteCmd := exec.CommandContext(ctx, "git", "rev-parse", "origin/main")
+	// Get remote tracking commit.
+	remoteCmd := exec.CommandContext(ctx, "git", "rev-parse", trackingRef)
 	remoteCmd.Dir = repoPath
 	remoteOut, err := remoteCmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get origin/main: %w", err)
+		return nil, fmt.Errorf("failed to get %s: %w", trackingRef, err)
 	}
 	remoteCommit := strings.TrimSpace(string(remoteOut))
 
 	result := &UpdateCheckResult{
 		CurrentCommit: localCommit,
 		LatestCommit:  remoteCommit,
+		CurrentBranch: currentBranch,
+		TrackingRef:   trackingRef,
 	}
 
 	if localCommit == remoteCommit {
@@ -462,6 +509,8 @@ func CheckForUpdates(ctx context.Context, repoPath string) (*UpdateCheckResult, 
 	log.Info("Update check complete",
 		"update_available", true,
 		"commits_behind", result.CommitsBehind,
+		"branch", currentBranch,
+		"tracking_ref", trackingRef,
 		"current", localCommit[:8],
 		"latest", remoteCommit[:8])
 

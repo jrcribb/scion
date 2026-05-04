@@ -148,6 +148,9 @@ type MaintenanceConfig struct {
 	RuntimeBin string
 	// RepoPath is the path to the scion source checkout for rebuild operations.
 	RepoPath string
+	// RepoBranch is the git branch to checkout before building. When empty,
+	// the repo stays on whatever branch is currently checked out.
+	RepoBranch string
 	// BinaryDest is the install path for the rebuilt binary (default: /usr/local/bin/scion).
 	BinaryDest string
 	// ServiceName is the systemd service name to restart (default: "scion-hub").

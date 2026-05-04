@@ -1306,7 +1306,16 @@ func resolveMaintenanceConfig(cfg *config.GlobalConfig) hub.MaintenanceConfig {
 		mc.RuntimeBin = v
 	}
 	if v := os.Getenv("SCION_MAINTENANCE_REPO_PATH"); v != "" {
-		mc.RepoPath = v
+		// Support "path@branch" syntax: /home/scion/scion@feature-branch
+		if path, branch, ok := strings.Cut(v, "@"); ok {
+			mc.RepoPath = path
+			mc.RepoBranch = branch
+		} else {
+			mc.RepoPath = v
+		}
+	}
+	if v := os.Getenv("SCION_MAINTENANCE_REPO_BRANCH"); v != "" {
+		mc.RepoBranch = v
 	}
 	if v := os.Getenv("SCION_MAINTENANCE_BINARY_DEST"); v != "" {
 		mc.BinaryDest = v

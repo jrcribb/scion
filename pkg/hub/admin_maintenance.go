@@ -273,17 +273,19 @@ func (s *Server) resolveMaintenanceExecutor(key string) (MaintenanceExecutor, er
 		}, nil
 	case "rebuild-server":
 		log.Debug("Resolved rebuild-server executor",
-			"repo_path", mc.RepoPath, "binary_dest", mc.BinaryDest,
-			"service_name", mc.ServiceName)
+			"repo_path", mc.RepoPath, "branch", mc.RepoBranch,
+			"binary_dest", mc.BinaryDest, "service_name", mc.ServiceName)
 		return &RebuildServerExecutor{
 			repoPath:    mc.RepoPath,
+			repoBranch:  mc.RepoBranch,
 			binaryDest:  mc.BinaryDest,
 			serviceName: mc.ServiceName,
 		}, nil
 	case "rebuild-web":
-		log.Debug("Resolved rebuild-web executor", "repo_path", mc.RepoPath)
+		log.Debug("Resolved rebuild-web executor", "repo_path", mc.RepoPath, "branch", mc.RepoBranch)
 		return &RebuildWebExecutor{
-			repoPath: mc.RepoPath,
+			repoPath:   mc.RepoPath,
+			repoBranch: mc.RepoBranch,
 		}, nil
 	default:
 		return nil, fmt.Errorf("no executor registered for operation %q", key)

@@ -15,11 +15,12 @@
 
 # scripts/starter-hub/gce-start-hub.sh - Build and start Scion Hub on GCE with Caddy Reverse Proxy
 #
-# Usage: scripts/starter-hub/gce-start-hub.sh [--full] [--reset-db]
+# Usage: scripts/starter-hub/gce-start-hub.sh [--full] [--reset-db] [--branch <branch>]
 #
 #   Default (fast): push → pull → build → restart → health check
 #   --full:         Also uploads config files, installs Caddy, updates systemd/Caddy
 #   --reset-db:     Deletes the hub database before starting (works in both modes)
+#   --branch <b>:   Checkout and build from a specific branch (default: current branch)
 
 set -euo pipefail
 
@@ -29,6 +30,7 @@ source "${SCRIPT_DIR}/hub-config.sh"
 DOMAIN="${HUB_DOMAIN}"
 RESET_DB=false
 FULL_DEPLOY=false
+BRANCH=""
 
 # --- Timing & Reporting Helpers ---
 
@@ -81,9 +83,13 @@ while [[ $# -gt 0 ]]; do
             FULL_DEPLOY=true
             shift
             ;;
+        --branch)
+            BRANCH="$2"
+            shift 2
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--full] [--reset-db]"
+            echo "Usage: $0 [--full] [--reset-db] [--branch <branch>]"
             exit 1
             ;;
     esac
@@ -106,7 +112,11 @@ fi
 # --- Step: Push ---
 
 step "Pushing to origin..."
-git push origin main
+if [[ -n "$BRANCH" ]]; then
+    git push origin "$BRANCH"
+else
+    git push origin main
+fi
 
 # --- Step: Upload config files (full mode only) ---
 
@@ -390,10 +400,20 @@ gcloud compute ssh "${INSTANCE_NAME}" --zone="${ZONE}" --command '
     '"${FULL_REMOTE_COMMANDS}"'
 
     # Pull
+    BRANCH='"${BRANCH}"'
     echo ""
-    echo "==> Pulling latest code..."
+    if [[ -n "$BRANCH" ]]; then
+        echo "==> Fetching and checking out branch ${BRANCH}..."
+    else
+        echo "==> Pulling latest code..."
+    fi
     PULL_START=$SECONDS
-    sudo -u scion sh -c "cd /home/scion/scion && git pull"
+    sudo -u scion sh -c "cd /home/scion/scion && git fetch origin"
+    if [[ -n "$BRANCH" ]]; then
+        sudo -u scion sh -c "cd /home/scion/scion && git checkout ${BRANCH} && git pull origin ${BRANCH}"
+    else
+        sudo -u scion sh -c "cd /home/scion/scion && git pull"
+    fi
     echo "  -> Pull took $(( SECONDS - PULL_START ))s"
 
     # Build web assets

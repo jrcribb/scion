@@ -216,6 +216,8 @@ interface UpdateCheckResult {
   update_available: boolean;
   current_commit: string;
   latest_commit: string;
+  current_branch: string;
+  tracking_ref: string;
   commits_behind: number;
   new_commits?: UpdateCommitInfo[];
 }
@@ -1130,7 +1132,7 @@ export class ScionPageAdminServerConfig extends LitElement {
               <div class="update-banner">
                 <div class="update-banner-header">
                   <sl-icon name="info-circle"></sl-icon>
-                  Update available &mdash; ${r.commits_behind} new commit${r.commits_behind === 1 ? '' : 's'}
+                  Update available${r.current_branch && r.current_branch !== 'main' ? html` on <code>${r.current_branch}</code>` : nothing} &mdash; ${r.commits_behind} new commit${r.commits_behind === 1 ? '' : 's'}
                 </div>
                 ${r.new_commits && r.new_commits.length > 0
                   ? html`
@@ -1160,7 +1162,7 @@ export class ScionPageAdminServerConfig extends LitElement {
             `
           : nothing}
         ${r && !r.update_available
-          ? html`<div class="update-current">Server is up to date.</div>`
+          ? html`<div class="update-current">Server is up to date${r.current_branch && r.current_branch !== 'main' ? html` on <code>${r.current_branch}</code>` : nothing}.</div>`
           : nothing}
       </div>
       ${this.showUpdateConfirm ? this.renderUpdateConfirmDialog() : nothing}
