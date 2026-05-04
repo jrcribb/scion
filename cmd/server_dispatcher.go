@@ -255,7 +255,7 @@ func (d *agentDispatcherAdapter) DispatchAgentMessage(ctx context.Context, hubAg
 	// Raw messages bypass the paste buffer and send literal bytes via send-keys
 	if structuredMsg != nil && structuredMsg.Raw {
 		deliveryText := messages.FormatForDelivery(structuredMsg)
-		if err := d.manager.MessageRaw(ctx, hubAgent.Name, deliveryText); err != nil {
+		if err := d.manager.MessageRaw(ctx, hubAgent.Name, hubAgent.GroveID, deliveryText); err != nil {
 			return fmt.Errorf("failed to send raw message: %w", err)
 		}
 		return nil
@@ -266,7 +266,7 @@ func (d *agentDispatcherAdapter) DispatchAgentMessage(ctx context.Context, hubAg
 	if structuredMsg != nil {
 		deliveryText = messages.FormatForDelivery(structuredMsg)
 	}
-	if err := d.manager.Message(ctx, hubAgent.Name, deliveryText, interrupt); err != nil {
+	if err := d.manager.Message(ctx, hubAgent.Name, hubAgent.GroveID, deliveryText, interrupt); err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 	return nil

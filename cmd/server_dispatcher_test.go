@@ -61,11 +61,11 @@ func (m *mockAgentManager) List(ctx context.Context, filter map[string]string) (
 	return nil, nil
 }
 
-func (m *mockAgentManager) Message(ctx context.Context, agentID string, message string, interrupt bool) error {
+func (m *mockAgentManager) Message(ctx context.Context, agentID, groveID string, message string, interrupt bool) error {
 	return nil
 }
 
-func (m *mockAgentManager) MessageRaw(ctx context.Context, agentID string, keys string) error {
+func (m *mockAgentManager) MessageRaw(ctx context.Context, agentID, groveID string, keys string) error {
 	return nil
 }
 

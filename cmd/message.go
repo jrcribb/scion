@@ -190,7 +190,7 @@ Examples:
 		// Raw mode: send literal bytes via send-keys with no trailing Enter
 		if msgRaw {
 			fmt.Printf("Sending raw keys to agent '%s'...\n", agentName)
-			return mgr.MessageRaw(ctx, agentName, message)
+			return mgr.MessageRaw(ctx, agentName, "", message)
 		}
 
 		var targets []string
@@ -236,7 +236,7 @@ Examples:
 				wg.Add(1)
 				go func(name string) {
 					defer wg.Done()
-					if err := mgr.Message(ctx, name, message, msgInterrupt); err != nil {
+					if err := mgr.Message(ctx, name, "", message, msgInterrupt); err != nil {
 						fmt.Printf("Warning: failed to send message to agent '%s': %s\n", name, err)
 						return
 					}
@@ -247,7 +247,7 @@ Examples:
 		} else {
 			for _, target := range targets {
 				fmt.Printf("Sending message to agent '%s'...\n", target)
-				if err := mgr.Message(ctx, target, message, msgInterrupt); err != nil {
+				if err := mgr.Message(ctx, target, "", message, msgInterrupt); err != nil {
 					if msgBroadcast || msgAll {
 						fmt.Printf("Warning: failed to send message to agent '%s': %s\n", target, err)
 						continue
