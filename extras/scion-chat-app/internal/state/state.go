@@ -310,11 +310,11 @@ func (s *Store) SetAgentSubscription(sub *AgentSubscription) error {
 	return nil
 }
 
-// DeleteAgentSubscription removes an agent subscription.
-func (s *Store) DeleteAgentSubscription(platformUserID, platform, agentID string) error {
+// DeleteAgentSubscription removes an agent subscription scoped to a specific grove.
+func (s *Store) DeleteAgentSubscription(platformUserID, platform, agentID, groveID string) error {
 	_, err := s.db.Exec(
-		`DELETE FROM agent_subscriptions WHERE platform_user_id = ? AND platform = ? AND agent_id = ?`,
-		platformUserID, platform, agentID,
+		`DELETE FROM agent_subscriptions WHERE platform_user_id = ? AND platform = ? AND agent_id = ? AND grove_id = ?`,
+		platformUserID, platform, agentID, groveID,
 	)
 	if err != nil {
 		return fmt.Errorf("delete agent subscription: %w", err)

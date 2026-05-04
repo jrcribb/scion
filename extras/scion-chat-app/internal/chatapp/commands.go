@@ -266,12 +266,20 @@ func (r *CommandRouter) handleDialogSubmit(ctx context.Context, event *ChatEvent
 			return r.reply(ctx, event, "No response text provided.")
 		}
 
+		link, err := r.store.GetSpaceLink(event.SpaceID, event.Platform)
+		if err != nil {
+			return fmt.Errorf("getting space link: %w", err)
+		}
+		if link == nil {
+			return r.reply(ctx, event, "This space is not linked to a grove.")
+		}
+
 		client, err := r.clientForUser(ctx, event)
 		if err != nil {
 			return r.reply(ctx, event, "Authentication required. Use `/scion register` first.")
 		}
 
-		if err := client.Agents().SendMessage(ctx, agentID, responseText, false); err != nil {
+		if err := client.GroveAgents(link.GroveID).SendMessage(ctx, agentID, responseText, false); err != nil {
 			return r.reply(ctx, event, fmt.Sprintf("Failed to send response to agent: %v", err))
 		}
 		return r.reply(ctx, event, fmt.Sprintf("Response sent to agent `%s`.", agentID))
@@ -293,24 +301,34 @@ func (r *CommandRouter) handleDialogSubmit(ctx context.Context, event *ChatEvent
 
 // handleAgentAction processes agent-specific button actions.
 func (r *CommandRouter) handleAgentAction(ctx context.Context, event *ChatEvent, verb, agentID string) error {
+	link, err := r.store.GetSpaceLink(event.SpaceID, event.Platform)
+	if err != nil {
+		return fmt.Errorf("getting space link: %w", err)
+	}
+	if link == nil {
+		return r.reply(ctx, event, "This space is not linked to a grove.")
+	}
+
 	client, err := r.clientForUser(ctx, event)
 	if err != nil {
 		return r.reply(ctx, event, "Authentication required. Use `/scion register` first.")
 	}
 
+	agents := client.GroveAgents(link.GroveID)
+
 	switch verb {
 	case "start":
-		if err := client.Agents().Start(ctx, agentID); err != nil {
+		if err := agents.Start(ctx, agentID); err != nil {
 			return r.reply(ctx, event, fmt.Sprintf("Failed to start agent: %v", err))
 		}
 		return r.reply(ctx, event, fmt.Sprintf("Agent `%s` started.", agentID))
 	case "stop":
-		if err := client.Agents().Stop(ctx, agentID); err != nil {
+		if err := agents.Stop(ctx, agentID); err != nil {
 			return r.reply(ctx, event, fmt.Sprintf("Failed to stop agent: %v", err))
 		}
 		return r.reply(ctx, event, fmt.Sprintf("Agent `%s` stopped.", agentID))
 	case "logs":
-		logs, err := client.Agents().GetLogs(ctx, agentID, &hubclient.GetLogsOptions{Tail: 50})
+		logs, err := agents.GetLogs(ctx, agentID, &hubclient.GetLogsOptions{Tail: 50})
 		if err != nil {
 			return r.reply(ctx, event, fmt.Sprintf("Failed to get logs: %v", err))
 		}
@@ -778,12 +796,20 @@ func (r *CommandRouter) showDeleteConfirmation(ctx context.Context, event *ChatE
 
 // executeDelete performs the actual agent deletion after confirmation.
 func (r *CommandRouter) executeDelete(ctx context.Context, event *ChatEvent, agentID string) error {
+	link, err := r.store.GetSpaceLink(event.SpaceID, event.Platform)
+	if err != nil {
+		return fmt.Errorf("getting space link: %w", err)
+	}
+	if link == nil {
+		return r.reply(ctx, event, "This space is not linked to a grove.")
+	}
+
 	client, err := r.clientForUser(ctx, event)
 	if err != nil {
 		return r.reply(ctx, event, "Authentication required. Use `/scion register` first.")
 	}
 
-	if err := client.Agents().Delete(ctx, agentID, nil); err != nil {
+	if err := client.GroveAgents(link.GroveID).Delete(ctx, agentID, nil); err != nil {
 		return r.reply(ctx, event, fmt.Sprintf("Failed to delete agent: %v", err))
 	}
 	return r.reply(ctx, event, fmt.Sprintf("Agent `%s` deleted.", agentID))
@@ -929,7 +955,12 @@ func (r *CommandRouter) cmdUnsubscribe(ctx context.Context, event *ChatEvent, ar
 		return textResponse(event, "Usage: `/scion unsubscribe <agent-slug>`"), nil
 	}
 
-	if err := r.store.DeleteAgentSubscription(event.UserID, event.Platform, args[0]); err != nil {
+	link, linkResp := r.requireSpaceLink(ctx, event)
+	if linkResp != nil {
+		return linkResp, nil
+	}
+
+	if err := r.store.DeleteAgentSubscription(event.UserID, event.Platform, args[0], link.GroveID); err != nil {
 		return textResponse(event, fmt.Sprintf("Failed to unsubscribe: %v", err)), nil
 	}
 	return textResponse(event, fmt.Sprintf("Unsubscribed from notifications for agent `%s`.", args[0])), nil
