@@ -27,6 +27,8 @@ if [[ -z "$PROJECT_ID" ]]; then
     exit 1
 fi
 
+wait_for_cloud_init
+
 echo "=== Ensuring scion user exists on VM ==="
 gcloud compute ssh "${INSTANCE_NAME}" \
     --project="${PROJECT_ID}" \

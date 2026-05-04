@@ -65,3 +65,45 @@ SCION_BIN="${SCION_BIN:-/usr/local/bin/scion}"
 GITHUB_REPO="${GITHUB_REPO:-GoogleCloudPlatform/scion}"
 CERT_EMAIL="${CERT_EMAIL:-ptone@google.com}"
 CLOUD_INIT_FILE="${CLOUD_INIT_FILE:-scripts/starter-hub/gce-demo-cloud-init.yaml}"
+
+# --- Shared Helpers ---
+
+# Wait for the instance to be reachable via SSH and for cloud-init to finish.
+# Call this before the first SSH-dependent step after provisioning.
+wait_for_cloud_init() {
+    echo "=== Waiting for VM to be ready (SSH + cloud-init) ==="
+    local max_wait=600  # 10 minutes
+    local interval=15
+    local elapsed=0
+
+    while (( elapsed < max_wait )); do
+        local result
+        result=$(gcloud compute ssh "${INSTANCE_NAME}" \
+            --project="${PROJECT_ID}" \
+            --zone="${ZONE}" \
+            --ssh-flag="-o ConnectTimeout=10" \
+            --command "cloud-init status 2>/dev/null || echo 'status: unknown'" \
+            2>/dev/null) || result="SSH_UNREACHABLE"
+
+        if [[ "$result" == "SSH_UNREACHABLE" ]]; then
+            echo "  -> SSH not available yet... (${elapsed}s elapsed)"
+        elif echo "$result" | grep -q "status: done"; then
+            echo "  -> VM ready: cloud-init complete (${elapsed}s elapsed)"
+            return 0
+        elif echo "$result" | grep -q "status: error"; then
+            echo "  -> Warning: cloud-init finished with errors (${elapsed}s elapsed)"
+            echo "     Check: sudo cat /var/log/cloud-init-output.log"
+            return 0
+        else
+            local status_text
+            status_text=$(echo "$result" | head -1)
+            echo "  -> SSH available, cloud-init: ${status_text} (${elapsed}s elapsed)"
+        fi
+
+        sleep "$interval"
+        elapsed=$(( elapsed + interval ))
+    done
+
+    echo "Error: VM did not become ready after ${max_wait}s"
+    return 1
+}
