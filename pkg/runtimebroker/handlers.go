@@ -963,7 +963,7 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request, id, p
 	case api.AgentActionMessage:
 		s.sendMessage(w, r, id, projectID)
 	case api.AgentActionExec:
-		s.execCommand(w, r, id)
+		s.execCommand(w, r, id, projectID)
 	case api.AgentActionLogs:
 		s.getLogs(w, r, id, projectID)
 	case api.AgentActionStats:
@@ -1149,11 +1149,66 @@ func isContainerStopTolerable(err error) bool {
 		strings.Contains(msg, "exit status 125")
 }
 
+// projectScopedTarget resolves an agent slug to its project-scoped container
+// identifier (container ID for docker/podman, pod name for k8s) via
+// LookupContainerID. When multiple projects on this broker have an agent with
+// the same slug, this ensures single-container operations act on the agent in
+// the requested project rather than whichever the slug matches first.
+//
+// When a projectID is supplied but the agent cannot be resolved, it returns ""
+// — callers must treat that as "not found in this project" rather than falling
+// back to the bare slug, which would risk acting on a same-slug agent in a
+// different project. Only when no projectID is supplied does it degrade to the
+// original id for backward compatibility (solo/CLI mode, unlabeled containers).
+// agentsWithoutProjectLabel returns the subset of agents that carry no project
+// label (neither scion.grove_id nor scion.project_id). The project-scoped
+// lookups fall back to a slug-only search for backward compatibility with
+// pre-existing / solo-mode containers that predate project labels; that
+// fallback must only match such genuinely unlabeled containers. A container
+// labeled for a *different* project must never satisfy a project-scoped
+// request, or same-slug agents across projects would collide.
+func agentsWithoutProjectLabel(agents []api.AgentInfo) []api.AgentInfo {
+	filtered := make([]api.AgentInfo, 0, len(agents))
+	for _, a := range agents {
+		if a.Labels["scion.grove_id"] == "" && a.Labels["scion.project_id"] == "" {
+			filtered = append(filtered, a)
+		}
+	}
+	return filtered
+}
+
+func (s *Server) projectScopedTarget(ctx context.Context, id, projectID string) string {
+	if containerID, err := s.LookupContainerID(ctx, id, projectID); err == nil && containerID != "" {
+		return containerID
+	}
+	if projectID != "" {
+		return ""
+	}
+	return id
+}
+
 func (s *Server) stopAgent(w http.ResponseWriter, r *http.Request, id, projectID string) {
 	ctx := r.Context()
 
 	mgr := s.resolveManagerForAgent(ctx, id, projectID)
-	if err := mgr.Stop(ctx, id, ""); err != nil {
+
+	// Resolve the project-scoped container so that same-slug agents in
+	// different projects on this broker don't collide. An empty target means
+	// the agent isn't present in this project; treat that as an idempotent
+	// no-op rather than stopping a same-slug agent in another project.
+	target := s.projectScopedTarget(ctx, id, projectID)
+	if target == "" {
+		s.agentLifecycleLog.Info("Agent stopped (not found in project)",
+			"agent_id", id,
+			"phase", string(state.PhaseStopped))
+		s.forceHeartbeatAll("stop", id)
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"status":  "accepted",
+			"message": "Stop operation accepted",
+		})
+		return
+	}
+	if err := mgr.Stop(ctx, target, ""); err != nil {
 		if isContainerStopTolerable(err) {
 			// Container doesn't exist, is already stopped, or podman/docker can't find it.
 			// Treat as success so the hub can update its state.
@@ -1225,7 +1280,13 @@ func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, id, projec
 	// be exited and the subsequent start will handle cleanup.
 	// Use resolveManagerForAgent to find the agent on auxiliary runtimes.
 	stopMgr := s.resolveManagerForAgent(ctx, id, projectID)
-	if err := stopMgr.Stop(ctx, id, ""); err != nil {
+	stopTarget := s.projectScopedTarget(ctx, id, projectID)
+	// An empty target means the agent isn't present in this project — skip the
+	// stop (don't risk stopping a same-slug agent in another project) and let
+	// the start below create it.
+	if stopTarget == "" {
+		s.agentLifecycleLog.Warn("Restart: agent not found in project, proceeding with start", "agent_id", id)
+	} else if err := stopMgr.Stop(ctx, stopTarget, ""); err != nil {
 		if isContainerStopTolerable(err) {
 			s.agentLifecycleLog.Warn("Restart: stop target not found or already stopped, proceeding with start", "agent_id", id, "error", err)
 		} else {
@@ -1333,7 +1394,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, id, project
 	w.WriteHeader(http.StatusOK)
 }
 
-func (s *Server) execCommand(w http.ResponseWriter, r *http.Request, id string) {
+func (s *Server) execCommand(w http.ResponseWriter, r *http.Request, id, projectID string) {
 	ctx := r.Context()
 
 	var req ExecRequest
@@ -1355,10 +1416,28 @@ func (s *Server) execCommand(w http.ResponseWriter, r *http.Request, id string) 
 	}
 
 	// Resolve the correct runtime for this agent (may be on an auxiliary runtime like K8s).
-	// Exec doesn't receive projectID from query params (internal operation).
-	rt := s.resolveRuntimeForAgent(ctx, id, "")
+	// projectID scopes the lookup so that, when multiple projects on this broker
+	// have an agent with the same slug, we operate on the agent in the requested
+	// project rather than whichever the runtime happens to match by slug first.
+	rt := s.resolveRuntimeForAgent(ctx, id, projectID)
 
-	output, err := rt.Exec(ctx, id, req.Command)
+	// Resolve the project-scoped container identifier (container ID for
+	// docker/podman, pod name for k8s) and exec against that rather than the
+	// bare slug. Without this, rt.Exec resolves the slug to a container across
+	// all projects and can target the wrong agent — e.g. "scion look
+	// coordinator" in project A showing project B's terminal. Mirrors the
+	// project-scoped lookup used by the PTY attach handler.
+	// LookupContainerID can return an empty identifier without an error (e.g.
+	// a matching agent record with no resolvable container), so guard against
+	// both — execing an empty target would fall back to slug resolution inside
+	// the runtime and reintroduce the cross-project collision.
+	target, err := s.LookupContainerID(ctx, id, projectID)
+	if err != nil || target == "" {
+		NotFound(w, "Agent")
+		return
+	}
+
+	output, err := rt.Exec(ctx, target, req.Command)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			NotFound(w, "Agent")
