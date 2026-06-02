@@ -307,12 +307,29 @@ func (r *CommandRouter) handleDialogSubmit(ctx context.Context, event *ChatEvent
 			return r.reply(ctx, event, "This space is not linked to a project.")
 		}
 
-		client, err := r.clientForUser(ctx, event)
+		mapping, err := r.idMapper.ResolveOrAutoRegister(ctx, &eventUserLookup{event}, event.UserID, event.Platform)
 		if err != nil {
+			r.log.Error("Failed to resolve user mapping", "error", err, "userID", event.UserID)
+			return r.reply(ctx, event, "Something went wrong, please try again later.")
+		}
+		if mapping == nil {
 			return r.reply(ctx, event, "Authentication required. Use `/scionAdmin register` first.")
 		}
+		client, err := r.idMapper.ClientFor(ctx, mapping)
+		if err != nil {
+			return r.reply(ctx, event, fmt.Sprintf("Failed to create client: %v", err))
+		}
 
-		if err := client.ProjectAgents(link.ProjectID).SendMessage(ctx, agentID, responseText, false); err != nil {
+		senderEmail := mapping.HubUserEmail
+		if senderEmail == "" {
+			return r.reply(ctx, event, "Your user mapping is missing a valid email address.")
+		}
+		msg := messages.NewInstruction("user:"+senderEmail, agentID, responseText)
+		msg.Channel = r.broker.ChannelName()
+		if event.ThreadID != "" {
+			msg.ThreadID = event.ThreadID
+		}
+		if err := client.ProjectAgents(link.ProjectID).SendStructuredMessage(ctx, agentID, msg, false, false, false); err != nil {
 			return r.reply(ctx, event, fmt.Sprintf("Failed to send response to agent: %v", err))
 		}
 		return r.reply(ctx, event, fmt.Sprintf("Response sent to agent `%s`.", agentID))
@@ -1063,9 +1080,11 @@ func (r *CommandRouter) cmdMessage(ctx context.Context, event *ChatEvent, args [
 
 	// Use the hub user email with "user:" prefix so agents can address replies
 	msg := messages.NewInstruction("user:"+mapping.HubUserEmail, agentSlug, messageText)
-	msg.Channel = "gchat"
+	msg.Channel = r.broker.ChannelName()
 	if threadID != "" {
 		msg.ThreadID = threadID
+	} else if event.ThreadID != "" {
+		msg.ThreadID = event.ThreadID
 	}
 
 	if err := client.ProjectAgents(link.ProjectID).SendStructuredMessage(ctx, agentSlug, msg, false, false, false); err != nil {

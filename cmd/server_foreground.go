@@ -348,9 +348,10 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 							log.Printf("Warning: failed to generate secret for broker plugin %q: %v", bt, secretErr)
 						} else {
 							hubCreds := map[string]string{
-								"hub_url":   hubEndpoint,
-								"hmac_key":  secretKey,
-								"broker_id": brokerID,
+								"hub_url":     hubEndpoint,
+								"hmac_key":    secretKey,
+								"broker_id":   brokerID,
+								"plugin_name": bt,
 							}
 							// Inject project slug map so hub-managed plugins can resolve
 							// human-readable project names without user-level API access.
@@ -377,10 +378,11 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 				}
 
 				observer := isObserverBroker(pluginMgr, bt)
+				channelID := pluginChannelID(pluginMgr, bt)
 				namedBuses = append(namedBuses, eventbus.NamedEventBus{
-					Name: bt, Bus: b, Observer: observer,
+					Name: bt, Bus: b, Observer: observer, ChannelID: channelID,
 				})
-				log.Printf("Message broker spoke added: name=%s observer=%v", bt, observer)
+				log.Printf("Message broker spoke added: name=%s channel_id=%s observer=%v", bt, channelID, observer)
 			}
 
 			fanout := eventbus.NewFanOutEventBus(namedBuses, logging.Subsystem("hub.eventbus.fanout"))
@@ -1250,13 +1252,38 @@ func startRuntimeBroker(ctx context.Context, cmd *cobra.Command, cfg *config.Glo
 	return nil
 }
 
+// pluginChannelID returns the channel identifier reported by a broker plugin
+// via GetInfo().ChannelID. Returns "" if the plugin does not report one, in
+// which case the bus Name is used for channel routing.
+func pluginChannelID(pluginMgr *scionplugin.Manager, name string) string {
+	raw, err := pluginMgr.Get(scionplugin.PluginTypeBroker, name)
+	if err != nil {
+		return ""
+	}
+	type infoer interface {
+		GetInfo() (*scionplugin.PluginInfo, error)
+	}
+	rpc, ok := raw.(infoer)
+	if !ok {
+		return ""
+	}
+	info, err := rpc.GetInfo()
+	if err != nil || info == nil {
+		return ""
+	}
+	return info.ChannelID
+}
+
 // isObserverBroker determines whether a broker plugin should be treated as an
 // observer (fire-and-forget on publish errors). It checks the plugin's
 // capabilities first, then falls back to a name-based heuristic.
 func isObserverBroker(pluginMgr *scionplugin.Manager, name string) bool {
 	raw, err := pluginMgr.Get(scionplugin.PluginTypeBroker, name)
 	if err == nil {
-		if rpc, ok := raw.(*scionplugin.BrokerRPCClient); ok {
+		type infoer interface {
+			GetInfo() (*scionplugin.PluginInfo, error)
+		}
+		if rpc, ok := raw.(infoer); ok {
 			if info, infoErr := rpc.GetInfo(); infoErr == nil && info != nil {
 				for _, cap := range info.Capabilities {
 					if strings.EqualFold(cap, "observer") {
