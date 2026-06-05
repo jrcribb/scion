@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -30,7 +31,6 @@ import (
 
 	"github.com/GoogleCloudPlatform/scion/pkg/storage"
 	"github.com/GoogleCloudPlatform/scion/pkg/store"
-	"github.com/GoogleCloudPlatform/scion/pkg/store/sqlite"
 )
 
 // contentMockStorage extends mockStorage to also store file content for
@@ -88,7 +88,7 @@ func (m *contentMockStorage) Exists(_ context.Context, objectPath string) (bool,
 // testTemplateFileServer creates a Server with content-aware mock storage.
 func testTemplateFileServer(t *testing.T) (*Server, store.Store, *contentMockStorage) {
 	t.Helper()
-	s, err := sqlite.New(":memory:")
+	s, err := newTestStore(":memory:")
 	if err != nil {
 		if strings.Contains(err.Error(), "sqlite driver not registered") {
 			t.Skip("Skipping: sqlite driver not registered")
@@ -120,7 +120,7 @@ func createTestTemplate(t *testing.T, s store.Store, stor *contentMockStorage, f
 	ctx := context.Background()
 
 	tmpl := &store.Template{
-		ID:            "tmpl-test-1",
+		ID:            tid("tmpl-test-1"),
 		Name:          "test-template",
 		Slug:          "test-template",
 		Harness:       "claude",
@@ -354,7 +354,7 @@ func TestHandleTemplateFileWrite_ConflictHash(t *testing.T) {
 	})
 
 	body := `{"content": "new", "expectedHash": "sha256:wronghash"}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/templates/tmpl-test-1/files/CLAUDE.md",
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/v1/templates/%s/files/CLAUDE.md", tid("tmpl-test-1")),
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+testDevToken)

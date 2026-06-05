@@ -142,6 +142,26 @@ func (_u *UserUpdate) ClearLastLogin() *UserUpdate {
 	return _u
 }
 
+// SetLastSeen sets the "last_seen" field.
+func (_u *UserUpdate) SetLastSeen(v time.Time) *UserUpdate {
+	_u.mutation.SetLastSeen(v)
+	return _u
+}
+
+// SetNillableLastSeen sets the "last_seen" field if the given value is not nil.
+func (_u *UserUpdate) SetNillableLastSeen(v *time.Time) *UserUpdate {
+	if v != nil {
+		_u.SetLastSeen(*v)
+	}
+	return _u
+}
+
+// ClearLastSeen clears the value of the "last_seen" field.
+func (_u *UserUpdate) ClearLastSeen() *UserUpdate {
+	_u.mutation.ClearLastSeen()
+	return _u
+}
+
 // AddCreatedAgentIDs adds the "created_agents" edge to the Agent entity by IDs.
 func (_u *UserUpdate) AddCreatedAgentIDs(ids ...uuid.UUID) *UserUpdate {
 	_u.mutation.AddCreatedAgentIDs(ids...)
@@ -361,11 +381,6 @@ func (_u *UserUpdate) check() error {
 			return &ValidationError{Name: "email", err: fmt.Errorf(`ent: validator failed for field "User.email": %w`, err)}
 		}
 	}
-	if v, ok := _u.mutation.DisplayName(); ok {
-		if err := user.DisplayNameValidator(v); err != nil {
-			return &ValidationError{Name: "display_name", err: fmt.Errorf(`ent: validator failed for field "User.display_name": %w`, err)}
-		}
-	}
 	if v, ok := _u.mutation.Role(); ok {
 		if err := user.RoleValidator(v); err != nil {
 			return &ValidationError{Name: "role", err: fmt.Errorf(`ent: validator failed for field "User.role": %w`, err)}
@@ -420,6 +435,12 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.LastLoginCleared() {
 		_spec.ClearField(user.FieldLastLogin, field.TypeTime)
+	}
+	if value, ok := _u.mutation.LastSeen(); ok {
+		_spec.SetField(user.FieldLastSeen, field.TypeTime, value)
+	}
+	if _u.mutation.LastSeenCleared() {
+		_spec.ClearField(user.FieldLastSeen, field.TypeTime)
 	}
 	if _u.mutation.CreatedAgentsCleared() {
 		edge := &sqlgraph.EdgeSpec{
@@ -774,6 +795,26 @@ func (_u *UserUpdateOne) ClearLastLogin() *UserUpdateOne {
 	return _u
 }
 
+// SetLastSeen sets the "last_seen" field.
+func (_u *UserUpdateOne) SetLastSeen(v time.Time) *UserUpdateOne {
+	_u.mutation.SetLastSeen(v)
+	return _u
+}
+
+// SetNillableLastSeen sets the "last_seen" field if the given value is not nil.
+func (_u *UserUpdateOne) SetNillableLastSeen(v *time.Time) *UserUpdateOne {
+	if v != nil {
+		_u.SetLastSeen(*v)
+	}
+	return _u
+}
+
+// ClearLastSeen clears the value of the "last_seen" field.
+func (_u *UserUpdateOne) ClearLastSeen() *UserUpdateOne {
+	_u.mutation.ClearLastSeen()
+	return _u
+}
+
 // AddCreatedAgentIDs adds the "created_agents" edge to the Agent entity by IDs.
 func (_u *UserUpdateOne) AddCreatedAgentIDs(ids ...uuid.UUID) *UserUpdateOne {
 	_u.mutation.AddCreatedAgentIDs(ids...)
@@ -1006,11 +1047,6 @@ func (_u *UserUpdateOne) check() error {
 			return &ValidationError{Name: "email", err: fmt.Errorf(`ent: validator failed for field "User.email": %w`, err)}
 		}
 	}
-	if v, ok := _u.mutation.DisplayName(); ok {
-		if err := user.DisplayNameValidator(v); err != nil {
-			return &ValidationError{Name: "display_name", err: fmt.Errorf(`ent: validator failed for field "User.display_name": %w`, err)}
-		}
-	}
 	if v, ok := _u.mutation.Role(); ok {
 		if err := user.RoleValidator(v); err != nil {
 			return &ValidationError{Name: "role", err: fmt.Errorf(`ent: validator failed for field "User.role": %w`, err)}
@@ -1082,6 +1118,12 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 	}
 	if _u.mutation.LastLoginCleared() {
 		_spec.ClearField(user.FieldLastLogin, field.TypeTime)
+	}
+	if value, ok := _u.mutation.LastSeen(); ok {
+		_spec.SetField(user.FieldLastSeen, field.TypeTime, value)
+	}
+	if _u.mutation.LastSeenCleared() {
+		_spec.ClearField(user.FieldLastSeen, field.TypeTime)
 	}
 	if _u.mutation.CreatedAgentsCleared() {
 		edge := &sqlgraph.EdgeSpec{
