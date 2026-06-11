@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"strings"
 
+	scionruntime "github.com/GoogleCloudPlatform/scion/pkg/runtime"
 	"github.com/GoogleCloudPlatform/scion/pkg/secret"
 	"github.com/GoogleCloudPlatform/scion/pkg/store"
 	"github.com/GoogleCloudPlatform/scion/pkg/util/logging"
@@ -172,7 +173,7 @@ func (e *PullImagesExecutor) Run(ctx context.Context, logger io.Writer, params m
 
 	runtimeBin := e.runtimeBin
 	if runtimeBin == "" {
-		runtimeBin = detectContainerRuntime()
+		runtimeBin = scionruntime.DetectContainerRuntime()
 	}
 	if runtimeBin == "" {
 		return fmt.Errorf("no container runtime found (tried docker, podman)")
@@ -218,16 +219,6 @@ func (e *PullImagesExecutor) Run(ctx context.Context, logger io.Writer, params m
 	}
 	log.Info("Pull images complete", "pulled", pulled, "total", len(harnesses))
 	return nil
-}
-
-// detectContainerRuntime finds an available container CLI on the system.
-func detectContainerRuntime() string {
-	for _, bin := range []string{"docker", "podman"} {
-		if p, err := exec.LookPath(bin); err == nil && p != "" {
-			return bin
-		}
-	}
-	return ""
 }
 
 // RebuildServerExecutor rebuilds the server binary from git and restarts via systemd.
