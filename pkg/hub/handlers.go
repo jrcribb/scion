@@ -16,6 +16,7 @@ package hub
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -217,6 +218,9 @@ type CreateAgentRequest struct {
 	// rather than create a brand-new one. When true and a stopped agent with
 	// the same name exists, the Hub recovers it instead of creating fresh.
 	Resume bool `json:"resume,omitempty"`
+	// NoAuth indicates the agent should start with zero injected credentials.
+	// When true, the Hub skips secret resolution and the broker skips credential injection.
+	NoAuth bool `json:"noAuth,omitempty"`
 	// GCPIdentity specifies the GCP identity assignment for the agent.
 	// Controls metadata server behavior and optional service account binding.
 	GCPIdentity *GCPIdentityAssignment `json:"gcp_identity,omitempty"`
@@ -7743,6 +7747,12 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request, key string) {
 		return
 	}
 
+	decoded, err := base64.StdEncoding.DecodeString(req.Value)
+	if err != nil {
+		http.Error(w, "value must be base64-encoded", http.StatusBadRequest)
+		return
+	}
+
 	// Validate and default secret type
 	secretType := req.Type
 	if secretType == "" {
@@ -7767,6 +7777,10 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request, key string) {
 
 	// Validate file-specific constraints
 	if secretType == store.SecretTypeFile {
+		if strings.Contains(target, "..") {
+			http.Error(w, "target path must not contain '..'", http.StatusBadRequest)
+			return
+		}
 		if !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~/") {
 			ValidationError(w, "file secret target must be an absolute path (or start with ~/)", map[string]interface{}{
 				"field": "target",
@@ -7774,13 +7788,9 @@ func (s *Server) setSecret(w http.ResponseWriter, r *http.Request, key string) {
 			})
 			return
 		}
-		// Enforce 64 KiB limit for file secrets
-		if len(req.Value) > 64*1024 {
-			ValidationError(w, "file secret value exceeds 64 KiB limit", map[string]interface{}{
-				"field": "value",
-				"limit": "65536 bytes",
-				"size":  len(req.Value),
-			})
+		const maxSecretSize = 64 * 1024
+		if len(decoded) > maxSecretSize {
+			http.Error(w, "secret value exceeds 64KB limit", http.StatusBadRequest)
 			return
 		}
 	}
@@ -7956,6 +7966,12 @@ func (s *Server) handleAgentSecrets(w http.ResponseWriter, r *http.Request, agen
 		return
 	}
 
+	decoded, err := base64.StdEncoding.DecodeString(req.Value)
+	if err != nil {
+		http.Error(w, "value must be base64-encoded", http.StatusBadRequest)
+		return
+	}
+
 	// Validate and default secret type.
 	secretType := req.Type
 	if secretType == "" {
@@ -7980,6 +7996,10 @@ func (s *Server) handleAgentSecrets(w http.ResponseWriter, r *http.Request, agen
 
 	// Validate file-specific constraints.
 	if secretType == store.SecretTypeFile {
+		if strings.Contains(target, "..") {
+			http.Error(w, "target path must not contain '..'", http.StatusBadRequest)
+			return
+		}
 		if !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~/") {
 			ValidationError(w, "file secret target must be an absolute path (or start with ~/)", map[string]interface{}{
 				"field": "target",
@@ -7987,12 +8007,9 @@ func (s *Server) handleAgentSecrets(w http.ResponseWriter, r *http.Request, agen
 			})
 			return
 		}
-		if (len(req.Value) * 3 / 4) > 64*1024 {
-			ValidationError(w, "file secret value exceeds 64 KiB limit", map[string]interface{}{
-				"field": "value",
-				"limit": "65536 bytes",
-				"size":  len(req.Value) * 3 / 4,
-			})
+		const maxSecretSize = 64 * 1024
+		if len(decoded) > maxSecretSize {
+			http.Error(w, "secret value exceeds 64KB limit", http.StatusBadRequest)
 			return
 		}
 	}
@@ -8445,6 +8462,11 @@ func (s *Server) handleProjectSecretByKey(w http.ResponseWriter, r *http.Request
 			ValidationError(w, "value is required", nil)
 			return
 		}
+		decoded, err := base64.StdEncoding.DecodeString(req.Value)
+		if err != nil {
+			http.Error(w, "value must be base64-encoded", http.StatusBadRequest)
+			return
+		}
 		secretType := req.Type
 		if secretType == "" {
 			secretType = store.SecretTypeEnvironment
@@ -8460,12 +8482,17 @@ func (s *Server) handleProjectSecretByKey(w http.ResponseWriter, r *http.Request
 			target = key
 		}
 		if secretType == store.SecretTypeFile {
+			if strings.Contains(target, "..") {
+				http.Error(w, "target path must not contain '..'", http.StatusBadRequest)
+				return
+			}
 			if !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~/") {
 				ValidationError(w, "file secret target must be an absolute path (or start with ~/)", map[string]interface{}{"field": "target", "value": target})
 				return
 			}
-			if len(req.Value) > 64*1024 {
-				ValidationError(w, "file secret value exceeds 64 KiB limit", map[string]interface{}{"field": "value", "limit": "65536 bytes", "size": len(req.Value)})
+			const maxSecretSize = 64 * 1024
+			if len(decoded) > maxSecretSize {
+				http.Error(w, "secret value exceeds 64KB limit", http.StatusBadRequest)
 				return
 			}
 		}
@@ -9070,6 +9097,11 @@ func (s *Server) handleBrokerSecretByKey(w http.ResponseWriter, r *http.Request,
 			ValidationError(w, "value is required", nil)
 			return
 		}
+		decoded, err := base64.StdEncoding.DecodeString(req.Value)
+		if err != nil {
+			http.Error(w, "value must be base64-encoded", http.StatusBadRequest)
+			return
+		}
 		secretType := req.Type
 		if secretType == "" {
 			secretType = store.SecretTypeEnvironment
@@ -9085,12 +9117,17 @@ func (s *Server) handleBrokerSecretByKey(w http.ResponseWriter, r *http.Request,
 			target = key
 		}
 		if secretType == store.SecretTypeFile {
+			if strings.Contains(target, "..") {
+				http.Error(w, "target path must not contain '..'", http.StatusBadRequest)
+				return
+			}
 			if !strings.HasPrefix(target, "/") && !strings.HasPrefix(target, "~/") {
 				ValidationError(w, "file secret target must be an absolute path (or start with ~/)", map[string]interface{}{"field": "target", "value": target})
 				return
 			}
-			if len(req.Value) > 64*1024 {
-				ValidationError(w, "file secret value exceeds 64 KiB limit", map[string]interface{}{"field": "value", "limit": "65536 bytes", "size": len(req.Value)})
+			const maxSecretSize = 64 * 1024
+			if len(decoded) > maxSecretSize {
+				http.Error(w, "secret value exceeds 64KB limit", http.StatusBadRequest)
 				return
 			}
 		}
@@ -9191,6 +9228,8 @@ func (s *Server) buildAppliedConfig(req CreateAgentRequest, harnessConfig string
 		Workspace:     req.Workspace,
 		CreatorName:   creatorName,
 	}
+
+	ac.NoAuth = req.NoAuth
 
 	if req.Config != nil {
 		ac.Image = req.Config.Image

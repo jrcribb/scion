@@ -73,13 +73,22 @@ Examples:
 		// Handle @file syntax: read file and base64-encode contents.
 		if strings.HasPrefix(value, "@") {
 			filePath := value[1:]
-			if strings.HasPrefix(filePath, "~/") {
+			if filePath == "~" || strings.HasPrefix(filePath, "~/") {
 				home, err := os.UserHomeDir()
 				if err != nil {
 					log.Error("Failed to expand home directory: %v", err)
 					os.Exit(1)
 				}
-				filePath = home + filePath[1:]
+				filePath = filepath.Join(home, strings.TrimPrefix(filePath[1:], "/"))
+			}
+			info, err := os.Stat(filePath)
+			if err != nil {
+				log.Error("Failed to stat file %s: %v", filePath, err)
+				os.Exit(1)
+			}
+			if info.Size() > 64*1024 {
+				log.Error("File exceeds 64KB limit (%d bytes)", info.Size())
+				os.Exit(1)
 			}
 			data, err := os.ReadFile(filePath)
 			if err != nil {
