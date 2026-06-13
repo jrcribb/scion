@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -56,14 +57,14 @@ Recipients:
   <agent-name>       Send to an agent (default, same as agent:<name>)
   agent:<name>       Send to an agent explicitly
   user:<name>        Send to a user's inbox (Hub mode only)
-  set[a,b,...]       Send to multiple recipients (Hub mode only)
+  group[a,b,...]     Send to multiple recipients (Hub mode only)
 
 If --broadcast is used, the recipient can be omitted and the message will be sent to all running agents.
 
 Examples:
   scion message my-agent "Please review the PR"
   scion message user:alice "I need clarification on the auth module"
-  scion message "set[agent:reviewer,user:alice,deploy-bot]" "Release v2 is ready"`,
+  scion message "group[agent:reviewer,user:alice,deploy-bot]" "Release v2 is ready"`,
 	Args:              cobra.MinimumNArgs(1),
 	ValidArgsFunction: getAgentNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -74,7 +75,7 @@ Examples:
 
 		if msgBroadcast || msgAll {
 			if len(args) > 0 && messages.IsGroupRecipient(args[0]) {
-				return fmt.Errorf("set[] recipients cannot be combined with --broadcast or --all")
+				return fmt.Errorf("group[] recipients cannot be combined with --broadcast or --all")
 			}
 			message = strings.Join(args, " ")
 		} else {
@@ -150,16 +151,16 @@ Examples:
 		// Validate group recipient restrictions
 		if len(groupRecipients) > 0 {
 			if msgBroadcast || msgAll {
-				return fmt.Errorf("set[] recipients cannot be combined with --broadcast or --all")
+				return fmt.Errorf("group[] recipients cannot be combined with --broadcast or --all")
 			}
 			if msgRaw {
-				return fmt.Errorf("--raw cannot be used with set[] recipients")
+				return fmt.Errorf("--raw cannot be used with group[] recipients")
 			}
 			if msgIn != "" || msgAt != "" {
-				return fmt.Errorf("--in/--at cannot be used with set[] recipients")
+				return fmt.Errorf("--in/--at cannot be used with group[] recipients")
 			}
 			if msgNotify {
-				return fmt.Errorf("--notify cannot be used with set[] recipients")
+				return fmt.Errorf("--notify cannot be used with group[] recipients")
 			}
 		}
 
@@ -209,7 +210,7 @@ Examples:
 
 		// Group recipients require Hub mode
 		if len(groupRecipients) > 0 && hubCtx == nil {
-			return fmt.Errorf("set[] recipients require Hub mode (use 'scion hub enable' first)")
+			return fmt.Errorf("group[] recipients require Hub mode (use 'scion hub enable' first)")
 		}
 
 		// User recipients require Hub mode
@@ -381,7 +382,14 @@ func sendMessageViaHub(hubCtx *HubContext, agentName string, message string, int
 	// Resolve sender identity for structured messages
 	sender := resolveSenderIdentity(hubCtx)
 
-	// Grove-scoped broadcast: list running agents, then fan-out individually.
+	// Validate --channel against registered channels
+	if msgChannel != "" {
+		if err := validateChannel(hubCtx, msgChannel); err != nil {
+			return err
+		}
+	}
+
+	// Grove-scoped broadcast: send via Hub broadcast endpoint.
 	if broadcast && !all {
 		projectID, err := GetProjectID(hubCtx)
 		if err != nil {
@@ -392,45 +400,24 @@ func sendMessageViaHub(hubCtx *HubContext, agentName string, message string, int
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		resp, err := agentSvc.List(ctx, &hubclient.ListAgentsOptions{Phase: "running"})
+		msg := buildStructuredMessage(sender, "", message)
+		msg.Broadcasted = true
+		bcastResp, err := agentSvc.BroadcastMessage(ctx, msg, interrupt)
 		if err != nil {
-			return wrapHubError(fmt.Errorf("failed to list agents via Hub: %w", err))
-		}
-
-		if len(resp.Agents) == 0 {
-			fmt.Println("No running agents found to broadcast to.")
-			return nil
+			return wrapHubError(fmt.Errorf("failed to broadcast message via Hub: %w", err))
 		}
 
 		if !isJSONOutput() {
-			fmt.Printf("Broadcasting message to %d agents...\n", len(resp.Agents))
+			printBroadcastAccepted(bcastResp)
 		}
-
-		var wg sync.WaitGroup
-		for _, a := range resp.Agents {
-			wg.Add(1)
-			go func(name string) {
-				defer wg.Done()
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-
-				msg := buildStructuredMessage(sender, "agent:"+name, message)
-				if err := agentSvc.SendStructuredMessage(ctx, name, msg, interrupt, false, false); err != nil {
-					fmt.Printf("Warning: failed to send message to agent '%s' via Hub: %s\n", name, err)
-					return
-				}
-				if !isJSONOutput() {
-					fmt.Printf("Message delivered to agent '%s' via Hub.\n", name)
-				}
-			}(a.Name)
-		}
-		wg.Wait()
 		return nil
 	}
 
 	// Global broadcast (--all): fan-out at client level across projects.
 	// Each project doesn't have a global broadcast endpoint, so we list all
 	// running agents and send individually.
+	// TODO: upgrade to P3 model (targeting breakdown, DELIVERY_FAILED notifications)
+	// once a global broadcast endpoint exists.
 	if all {
 		agentSvc := hubCtx.Client.Agents()
 
@@ -460,7 +447,7 @@ func sendMessageViaHub(hubCtx *HubContext, agentName string, message string, int
 				defer cancel()
 
 				msg := buildStructuredMessage(sender, "agent:"+name, message)
-				if err := agentSvc.SendStructuredMessage(ctx, name, msg, interrupt, false, false); err != nil {
+				if _, err := agentSvc.SendStructuredMessage(ctx, name, msg, interrupt, false, false); err != nil {
 					fmt.Printf("Warning: failed to send message to agent '%s' via Hub: %s\n", name, err)
 					return
 				}
@@ -488,12 +475,12 @@ func sendMessageViaHub(hubCtx *HubContext, agentName string, message string, int
 	defer cancel()
 
 	msg := buildStructuredMessage(sender, "agent:"+agentName, message)
-	if err := agentSvc.SendStructuredMessage(ctx, agentName, msg, interrupt, notify, wake); err != nil {
+	if _, err := agentSvc.SendStructuredMessage(ctx, agentName, msg, interrupt, notify, wake); err != nil {
 		return wrapHubError(fmt.Errorf("failed to send message to agent '%s' via Hub: %w", agentName, err))
 	}
 
 	if !isJSONOutput() {
-		fmt.Printf("Message sent to agent '%s' via Hub.\n", agentName)
+		fmt.Printf("Message delivered to agent '%s'.\n", agentName)
 		if notify {
 			fmt.Printf("Subscribed to notifications for agent '%s'.\n", agentName)
 		}
@@ -501,9 +488,46 @@ func sendMessageViaHub(hubCtx *HubContext, agentName string, message string, int
 	return nil
 }
 
+func printBroadcastAccepted(resp *hubclient.BroadcastResponse) {
+	if resp == nil {
+		fmt.Println("Broadcast accepted.")
+		return
+	}
+	if resp.Targeted == 0 {
+		if resp.Skipped > 0 {
+			fmt.Printf("No running agents to broadcast to (%d agents skipped).\n", resp.Skipped)
+		} else {
+			fmt.Println("No running agents found to broadcast to.")
+		}
+		return
+	}
+	if resp.Skipped > 0 {
+		phases := make([]string, 0, len(resp.SkippedBreakdown))
+		for phase := range resp.SkippedBreakdown {
+			phases = append(phases, phase)
+		}
+		sort.Strings(phases)
+		parts := make([]string, 0, len(phases))
+		for _, phase := range phases {
+			parts = append(parts, fmt.Sprintf("%d %s", resp.SkippedBreakdown[phase], phase))
+		}
+		fmt.Printf("Broadcast accepted (%d running agents targeted, %d skipped: %s).\n",
+			resp.Targeted, resp.Skipped, strings.Join(parts, ", "))
+	} else {
+		fmt.Printf("Broadcast accepted (%d running agents targeted).\n", resp.Targeted)
+	}
+}
+
 func sendOutboundMessageViaHub(hubCtx *HubContext, userRecipient string, message string, urgent bool) error {
 	if !isJSONOutput() {
 		PrintUsingHub(hubCtx.Endpoint)
+	}
+
+	// Validate --channel against registered channels
+	if msgChannel != "" {
+		if err := validateChannel(hubCtx, msgChannel); err != nil {
+			return err
+		}
 	}
 
 	// Determine the sending agent's name. This command is intended for use
@@ -582,7 +606,7 @@ func sendGroupMessageViaHub(hubCtx *HubContext, recipients []messages.GroupRecip
 				slug := api.Slugify(recip.Name)
 				msg := buildStructuredMessage(sender, "agent:"+slug, message)
 				msg.Metadata = map[string]string{"group_id": groupID}
-				if err := agentSvc.SendStructuredMessage(ctx, slug, msg, interrupt, false, false); err != nil {
+				if _, err := agentSvc.SendStructuredMessage(ctx, slug, msg, interrupt, false, false); err != nil {
 					results[idx] = recipientResult{Recipient: recipStr, Status: "failed", Error: err.Error()}
 					if !isJSONOutput() {
 						fmt.Printf("  Failed: %s: %s\n", recipStr, err)
@@ -736,6 +760,33 @@ var messageChannelsCmd = &cobra.Command{
 		}
 		return tw.Flush()
 	},
+}
+
+// validateChannel checks that the given channel name is registered with the Hub.
+func validateChannel(hubCtx *HubContext, channel string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	channels, err := hubCtx.Client.Messages().ListChannels(ctx)
+	if err != nil {
+		return wrapHubError(fmt.Errorf("failed to list channels: %w", err))
+	}
+
+	for _, ch := range channels {
+		if ch.Name == channel {
+			return nil
+		}
+	}
+
+	available := make([]string, len(channels))
+	for i, ch := range channels {
+		available[i] = ch.Name
+	}
+
+	if len(available) == 0 {
+		return fmt.Errorf("channel %q is not registered; no channels are currently available", channel)
+	}
+	return fmt.Errorf("channel %q is not registered; available channels: %s", channel, strings.Join(available, ", "))
 }
 
 func init() {

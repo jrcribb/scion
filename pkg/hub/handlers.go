@@ -1730,6 +1730,9 @@ func (s *Server) performAgentDelete(w http.ResponseWriter, r *http.Request, agen
 		}
 	}
 
+	// Cancel pending scheduled events targeting this agent
+	s.cancelScheduledEventsForAgent(ctx, agent)
+
 	if softDelete {
 		// Soft delete: mark agent as deleted with timestamp
 		agent.Phase = string(state.PhaseStopped)
@@ -1751,6 +1754,64 @@ func (s *Server) performAgentDelete(w http.ResponseWriter, r *http.Request, agen
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// cancelScheduledEventsForAgent cancels all pending scheduled events that
+// target the given agent, preventing orphaned events from firing after deletion.
+func (s *Server) cancelScheduledEventsForAgent(ctx context.Context, agent *store.Agent) {
+	result, err := s.store.ListScheduledEvents(ctx, store.ScheduledEventFilter{
+		ProjectID: agent.ProjectID,
+		Status:    store.ScheduledEventPending,
+	}, store.ListOptions{Limit: 1000})
+	if err != nil {
+		s.agentLifecycleLog.Warn("Failed to list scheduled events for cleanup",
+			"agent_id", agent.ID, "error", err)
+		return
+	}
+
+	var cancelled int
+	for _, evt := range result.Items {
+		if !eventTargetsAgent(evt, agent) {
+			continue
+		}
+		if err := s.store.UpdateScheduledEventStatus(ctx, evt.ID,
+			store.ScheduledEventCancelled, nil, "target agent deleted"); err != nil {
+			s.agentLifecycleLog.Warn("Failed to cancel scheduled event",
+				"event_id", evt.ID, "agent_id", agent.ID, "error", err)
+			continue
+		}
+		if s.scheduler != nil {
+			if cancelErr := s.scheduler.CancelEvent(ctx, evt.ID); cancelErr != nil {
+				s.agentLifecycleLog.Warn("Failed to cancel in-memory scheduler timer",
+					"event_id", evt.ID, "error", cancelErr)
+			}
+		}
+		cancelled++
+	}
+
+	if cancelled > 0 {
+		s.agentLifecycleLog.Info("Cancelled scheduled events for deleted agent",
+			"agent_id", agent.ID, "agent_name", agent.Name, "cancelled", cancelled)
+	}
+}
+
+// eventTargetsAgent checks whether a scheduled event's payload targets the
+// given agent by matching agent ID or name/slug.
+func eventTargetsAgent(evt store.ScheduledEvent, agent *store.Agent) bool {
+	var payload struct {
+		AgentID   string `json:"agentId"`
+		AgentName string `json:"agentName"`
+	}
+	if err := json.Unmarshal([]byte(evt.Payload), &payload); err != nil {
+		return false
+	}
+	if payload.AgentID != "" && payload.AgentID == agent.ID {
+		return true
+	}
+	if payload.AgentName != "" && (payload.AgentName == agent.Name || payload.AgentName == agent.Slug) {
+		return true
+	}
+	return false
 }
 
 func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request, id, action string) {
@@ -2095,23 +2156,39 @@ func (s *Server) handleAgentOutboundMessage(w http.ResponseWriter, r *http.Reque
 	}
 
 	if recipientID == "" && recipient == "" {
-		// No explicit recipient — default to the agent's owner/creator.
-		recipientID = agent.OwnerID
-		if recipientID == "" {
-			recipientID = agent.CreatedBy
+		ValidationError(w, "recipient is required — specify a user with 'user:<name>' or 'user:<email>'", nil)
+		return
+	}
+
+	// Validate channel against registered channels.
+	// Fail closed: if broker proxy is unavailable, reject the message rather than
+	// silently skipping validation.
+	if req.Channel != "" {
+		bp := s.GetMessageBrokerProxy()
+		if bp == nil {
+			writeError(w, http.StatusServiceUnavailable, "broker_unavailable",
+				"cannot validate channel: message broker is not available", nil)
+			return
 		}
-		// Resolve display name from user record if possible.
-		if recipientID != "" {
-			if u, err := s.store.GetUser(ctx, recipientID); err == nil {
-				name := u.DisplayName
-				if name == "" {
-					name = u.Email
-				}
-				recipient = "user:" + name
+		channels := bp.ListChannels()
+		found := false
+		for _, ch := range channels {
+			if ch.Name == req.Channel {
+				found = true
+				break
 			}
 		}
-		if recipient == "" && recipientID != "" {
-			recipient = "user:" + recipientID
+		if !found {
+			available := make([]string, len(channels))
+			for i, ch := range channels {
+				available[i] = ch.Name
+			}
+			if len(available) == 0 {
+				ValidationError(w, fmt.Sprintf("channel %q is not registered; no channels are currently available", req.Channel), nil)
+			} else {
+				ValidationError(w, fmt.Sprintf("channel %q is not registered; available channels: %s", req.Channel, strings.Join(available, ", ")), nil)
+			}
+			return
 		}
 	}
 
@@ -2152,13 +2229,18 @@ func (s *Server) handleAgentOutboundMessage(w http.ResponseWriter, r *http.Reque
 		if err := bp.PublishUserMessage(ctx, agent.ProjectID, recipientID, structuredMsg); err != nil {
 			s.messageLog.Error("Failed to dispatch outbound message through broker",
 				"agent_id", agent.ID, "recipient_id", recipientID, "error", err)
-		} else {
-			s.messageLog.Info("Outbound message dispatched through broker",
-				"agent_id", agent.ID, "recipient_id", recipientID, "project_id", agent.ProjectID)
+			writeError(w, http.StatusBadGateway, ErrCodeDeliveryFailed,
+				"Message delivery failed: "+err.Error(), nil)
+			return
 		}
+		s.messageLog.Info("Outbound message dispatched through broker",
+			"agent_id", agent.ID, "recipient_id", recipientID, "project_id", agent.ProjectID)
 	} else {
 		if err := s.store.CreateMessage(ctx, storeMsg); err != nil {
 			s.messageLog.Error("Failed to persist outbound message", "error", err)
+			writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
+				"Failed to persist message", nil)
+			return
 		}
 		s.events.PublishUserMessage(ctx, storeMsg)
 		if s.channelRegistry != nil && s.channelRegistry.Len() > 0 {
@@ -2174,7 +2256,12 @@ func (s *Server) handleAgentOutboundMessage(w http.ResponseWriter, r *http.Reque
 		"msg_type", req.Type,
 	)
 
-	w.WriteHeader(http.StatusOK)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"message_id":   storeMsg.ID,
+		"status":       "sent",
+		"recipient":    recipient,
+		"recipient_id": recipientID,
+	})
 }
 
 // handleAgentGitHubTokenRefresh handles POST /api/v1/agents/{id}/refresh-token.
@@ -2378,8 +2465,8 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 
-	// Detect set[] recipient for multi-target fan-out.
-	if structuredMsg != nil && messages.IsSetRecipient(structuredMsg.Recipient) {
+	// Detect group[] recipient for multi-target fan-out.
+	if structuredMsg != nil && messages.IsGroupRecipient(structuredMsg.Recipient) {
 		s.handleGroupMessage(w, r, id, structuredMsg, plainMessage, req.Interrupt)
 		return
 	}
@@ -2423,7 +2510,7 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 			agent.Phase = string(state.PhaseStarting)
 			s.events.PublishAgentStatus(ctx, agent)
 
-			if err := s.waitForAgentReady(ctx, id, 15*time.Second); err != nil {
+			if err := s.waitForAgentReady(ctx, id, 30*time.Second); err != nil {
 				// On failure, set agent to an error state for clarity.
 				_ = s.store.UpdateAgentStatus(ctx, id, store.AgentStatusUpdate{Phase: string(state.PhaseError), Message: "Failed to become ready after wake"})
 				RuntimeError(w, "Agent resumed but did not become ready: "+err.Error())
@@ -2459,6 +2546,30 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 		}
 	}
 
+	// Reject messages to non-running agents when --wake is not set.
+	if !req.Wake {
+		switch state.Phase(agent.Phase) {
+		case state.PhaseRunning:
+			// OK — proceed to deliver
+		case state.PhaseSuspended:
+			writeError(w, http.StatusConflict, ErrCodeAgentNotRunning,
+				fmt.Sprintf("Agent %q is suspended. Use --wake to resume and deliver.", agent.Slug), nil)
+			return
+		case state.PhaseStopped:
+			writeError(w, http.StatusConflict, ErrCodeAgentNotRunning,
+				fmt.Sprintf("Agent %q is stopped. Use 'scion start' to start a new session.", agent.Slug), nil)
+			return
+		case state.PhaseError:
+			writeError(w, http.StatusConflict, ErrCodeAgentNotRunning,
+				fmt.Sprintf("Agent %q is in error state. Use 'scion start' to restart.", agent.Slug), nil)
+			return
+		default:
+			writeError(w, http.StatusConflict, ErrCodeAgentNotRunning,
+				fmt.Sprintf("Agent %q is not yet running (phase: %s). Wait for it to reach running state.", agent.Slug, agent.Phase), nil)
+			return
+		}
+	}
+
 	// Populate recipient slug and ID from the resolved agent.
 	structuredMsg.Recipient = "agent:" + agent.Slug
 	structuredMsg.RecipientID = agent.ID
@@ -2478,24 +2589,26 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 	}
 	s.logMessage("message dispatched", logAttrs...)
 
-	// Persist to message store (write-through; non-fatal if store fails)
+	// Persist to message store before delivery attempt. Set dispatch_state
+	// to "dispatched" (no new pending rows per delivery policy).
 	var persistedMsgID string
 	if structuredMsg != nil {
 		storeMsg := &store.Message{
-			ID:          api.NewUUID(),
-			ProjectID:   agent.ProjectID,
-			Sender:      structuredMsg.Sender,
-			SenderID:    structuredMsg.SenderID,
-			Recipient:   structuredMsg.Recipient,
-			RecipientID: structuredMsg.RecipientID,
-			Msg:         structuredMsg.Msg,
-			Type:        structuredMsg.Type,
-			Urgent:      structuredMsg.Urgent,
-			Broadcasted: structuredMsg.Broadcasted,
-			AgentID:     agent.ID,
-			CreatedAt:   time.Now(),
+			ID:            api.NewUUID(),
+			ProjectID:     agent.ProjectID,
+			Sender:        structuredMsg.Sender,
+			SenderID:      structuredMsg.SenderID,
+			Recipient:     structuredMsg.Recipient,
+			RecipientID:   structuredMsg.RecipientID,
+			Msg:           structuredMsg.Msg,
+			Type:          structuredMsg.Type,
+			Urgent:        structuredMsg.Urgent,
+			Broadcasted:   structuredMsg.Broadcasted,
+			AgentID:       agent.ID,
+			DispatchState: store.MessageDispatchDispatched,
+			CreatedAt:     time.Now(),
 		}
-		// Propagate GroupID from metadata so CLI-originated set[] messages
+		// Propagate GroupID from metadata so CLI-originated group[] messages
 		// preserve correlation in the store.
 		if structuredMsg.Metadata != nil {
 			if gid, ok := structuredMsg.Metadata["group_id"]; ok {
@@ -2523,37 +2636,25 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 		ServiceNotReady(w, "Agent has no runtime broker assigned — the server may still be starting up")
 		return
 	}
-	if err := dispatcher.DispatchAgentMessage(ctx, agent, plainMessage, req.Interrupt, structuredMsg); errors.Is(err, ErrMessageDeferred) {
-		s.signalDeferredMessage(ctx, agent.RuntimeBrokerID, agent.ID)
-		// Create notification subscription if requested (before returning 202)
-		if req.Notify {
-			var notifySubscriberType, notifySubscriberID, createdBy string
-			if agentIdent := GetAgentIdentityFromContext(ctx); agentIdent != nil {
-				createdBy = agentIdent.ID()
-				if creatorAgent, err := s.store.GetAgent(ctx, agentIdent.ID()); err == nil {
-					notifySubscriberType = store.SubscriberTypeAgent
-					notifySubscriberID = creatorAgent.Slug
-				}
-			} else if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
-				createdBy = userIdent.ID()
-				notifySubscriberType = store.SubscriberTypeUser
-				notifySubscriberID = userIdent.ID()
-			}
-			s.createNotifySubscription(ctx, agent.ID, agent.ProjectID, notifySubscriberType, notifySubscriberID, createdBy)
-		}
-		w.WriteHeader(http.StatusAccepted)
-		return
-	} else if err != nil {
-		RuntimeError(w, "Failed to send message to runtime broker: "+err.Error())
-		return
-	}
 
-	// Mark the message as dispatched so reconcileBroker does not
-	// re-deliver it on the next broker reconnect.
-	if persistedMsgID != "" {
-		if _, err := s.store.MarkMessageDispatched(ctx, persistedMsgID); err != nil {
-			s.messageLog.Error("Failed to mark message dispatched", "id", persistedMsgID, "error", err)
+	// Synchronous delivery with 30s retry deadline for transient broker failures.
+	retryCtx, retryCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer retryCancel()
+
+	if err := dispatchWithBrokerRetry(retryCtx, dispatcher, agent, plainMessage, req.Interrupt, structuredMsg); err != nil {
+		if persistedMsgID != "" {
+			if markErr := s.store.MarkMessageFailed(ctx, persistedMsgID, err.Error()); markErr != nil {
+				s.messageLog.Error("Failed to mark message as failed", "id", persistedMsgID, "error", markErr)
+			}
 		}
+		if errors.Is(err, ErrBrokerTimeout) {
+			GatewayTimeout(w, "Broker unreachable after 30s deadline")
+		} else if req.Wake {
+			RuntimeError(w, "Agent resumed successfully but message delivery failed: "+err.Error())
+		} else {
+			RuntimeError(w, "Failed to send message to runtime broker: "+err.Error())
+		}
+		return
 	}
 
 	// Publish agent-to-agent messages through the broker so plugin observers
@@ -2588,17 +2689,32 @@ func (s *Server) handleAgentMessage(w http.ResponseWriter, r *http.Request, id s
 		s.createNotifySubscription(ctx, agent.ID, agent.ProjectID, notifySubscriberType, notifySubscriberID, createdBy)
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(MessageDeliveryResponse{
+		MessageID:  persistedMsgID,
+		Status:     "delivered",
+		Agent:      agent.Slug,
+		AgentPhase: agent.Phase,
+	})
 }
 
-// GroupMessageRecipientResult represents the delivery status for one recipient in a set[] delivery.
+// MessageDeliveryResponse is the JSON response for a successful agent message delivery.
+type MessageDeliveryResponse struct {
+	MessageID  string `json:"message_id"`
+	Status     string `json:"status"`
+	Agent      string `json:"agent"`
+	AgentPhase string `json:"agent_phase"`
+}
+
+// GroupMessageRecipientResult represents the delivery status for one recipient in a group[] delivery.
 type GroupMessageRecipientResult struct {
 	Recipient string `json:"recipient"`
 	Status    string `json:"status"`
 	Error     string `json:"error,omitempty"`
 }
 
-// GroupMessageResponse is the JSON response for a set[] message delivery.
+// GroupMessageResponse is the JSON response for a group[] message delivery.
 type GroupMessageResponse struct {
 	GroupID   string                        `json:"group_id"`
 	Delivered int                           `json:"delivered"`
@@ -2606,13 +2722,13 @@ type GroupMessageResponse struct {
 	Results   []GroupMessageRecipientResult `json:"results"`
 }
 
-// handleGroupMessage fans out a structured message to multiple recipients parsed from set[].
+// handleGroupMessage fans out a structured message to multiple recipients parsed from group[].
 func (s *Server) handleGroupMessage(w http.ResponseWriter, r *http.Request, anchorID string, msg *messages.StructuredMessage, plainMessage string, interrupt bool) {
 	ctx := r.Context()
 
-	recipients, err := messages.ParseSetRecipient(msg.Recipient)
+	recipients, err := messages.ParseGroupRecipient(msg.Recipient)
 	if err != nil {
-		ValidationError(w, "invalid set[] recipient: "+err.Error(), nil)
+		ValidationError(w, "invalid group[] recipient: "+err.Error(), nil)
 		return
 	}
 
@@ -2628,7 +2744,7 @@ func (s *Server) handleGroupMessage(w http.ResponseWriter, r *http.Request, anch
 	for i, r := range recipients {
 		recipientStrs[i] = r.String()
 	}
-	recipientsSet := messages.FormatSetRecipients(msg.Sender, recipientStrs)
+	recipientsSet := messages.FormatGroupRecipients(msg.Sender, recipientStrs)
 
 	groupID := api.NewUUID()
 	results := make([]GroupMessageRecipientResult, len(recipients))
@@ -2636,6 +2752,8 @@ func (s *Server) handleGroupMessage(w http.ResponseWriter, r *http.Request, anch
 
 	dispatcher := s.GetDispatcher()
 
+	// Note: retries are sequential — large groups with unreachable members
+	// may block for up to N × 30s. Future work: parallel dispatch.
 	for i, recip := range recipients {
 		recipStr := recip.String()
 
@@ -2653,47 +2771,44 @@ func (s *Server) handleGroupMessage(w http.ResponseWriter, r *http.Request, anch
 			agentMsg.Recipients = recipientsSet
 
 			storeMsg := &store.Message{
-				ID:          api.NewUUID(),
-				ProjectID:   projectID,
-				Sender:      agentMsg.Sender,
-				SenderID:    agentMsg.SenderID,
-				Recipient:   agentMsg.Recipient,
-				RecipientID: agentMsg.RecipientID,
-				Msg:         agentMsg.Msg,
-				Type:        agentMsg.Type,
-				Urgent:      agentMsg.Urgent,
-				AgentID:     agent.ID,
-				GroupID:     groupID,
-				CreatedAt:   time.Now(),
+				ID:            api.NewUUID(),
+				ProjectID:     projectID,
+				Sender:        agentMsg.Sender,
+				SenderID:      agentMsg.SenderID,
+				Recipient:     agentMsg.Recipient,
+				RecipientID:   agentMsg.RecipientID,
+				Msg:           agentMsg.Msg,
+				Type:          agentMsg.Type,
+				Urgent:        agentMsg.Urgent,
+				AgentID:       agent.ID,
+				GroupID:       groupID,
+				DispatchState: store.MessageDispatchDispatched,
+				CreatedAt:     time.Now(),
 			}
 			if err := s.store.CreateMessage(ctx, storeMsg); err != nil {
 				s.messageLog.Error("Failed to persist set message", "recipient", recipStr, "error", err)
 			}
 			s.events.PublishUserMessage(ctx, storeMsg)
 
-			if dispatcher != nil && agent.RuntimeBrokerID != "" {
-				if err := dispatcher.DispatchAgentMessage(ctx, agent, plainMessage, interrupt, &agentMsg); errors.Is(err, ErrMessageDeferred) {
-					s.signalDeferredMessage(ctx, agent.RuntimeBrokerID, agent.ID)
-					results[i] = GroupMessageRecipientResult{Recipient: recipStr, Status: "deferred"}
-					delivered++
-					continue
-				} else if err != nil {
-					results[i] = GroupMessageRecipientResult{Recipient: recipStr, Status: "failed", Error: err.Error()}
-					continue
-				}
-			} else if dispatcher == nil {
+			if dispatcher == nil {
 				results[i] = GroupMessageRecipientResult{Recipient: recipStr, Status: "failed", Error: "dispatcher not available"}
 				continue
-			} else {
+			}
+			if agent.RuntimeBrokerID == "" {
 				results[i] = GroupMessageRecipientResult{Recipient: recipStr, Status: "failed", Error: "agent has no runtime broker"}
 				continue
 			}
 
-			// Mark the message as dispatched so reconcileBroker does not
-			// re-deliver it on the next broker reconnect.
-			if _, err := s.store.MarkMessageDispatched(ctx, storeMsg.ID); err != nil {
-				s.messageLog.Error("Failed to mark set message dispatched", "id", storeMsg.ID, "error", err)
+			retryCtx, retryCancel := context.WithTimeout(ctx, 30*time.Second)
+			if err := dispatchWithBrokerRetry(retryCtx, dispatcher, agent, plainMessage, interrupt, &agentMsg); err != nil {
+				retryCancel()
+				if markErr := s.store.MarkMessageFailed(ctx, storeMsg.ID, err.Error()); markErr != nil {
+					s.messageLog.Error("Failed to mark set message as failed", "id", storeMsg.ID, "error", markErr)
+				}
+				results[i] = GroupMessageRecipientResult{Recipient: recipStr, Status: "failed", Error: err.Error()}
+				continue
 			}
+			retryCancel()
 
 			// Publish agent-to-agent messages through the broker for plugin observers.
 			if strings.HasPrefix(agentMsg.Sender, "agent:") {
@@ -2701,7 +2816,7 @@ func (s *Server) handleGroupMessage(w http.ResponseWriter, r *http.Request, anch
 					observerMsg := agentMsg
 					observerMsg.ObserverOnly = true
 					if err := bp.PublishMessage(ctx, projectID, &observerMsg); err != nil {
-						s.messageLog.Error("Failed to publish set[] observer message",
+						s.messageLog.Error("Failed to publish group[] observer message",
 							"recipient", recipStr, "error", err)
 					}
 				}
@@ -2853,10 +2968,50 @@ func (s *Server) handleProjectBroadcast(w http.ResponseWriter, r *http.Request, 
 		}
 	}
 
+	// Compute broadcast targeting: list all agents, classify by phase.
+	allResult, err := s.store.ListAgents(ctx, store.AgentFilter{
+		ProjectID: projectID,
+	}, store.ListOptions{})
+	if err != nil {
+		writeErrorFromErr(w, err, "")
+		return
+	}
+
+	var targeted int
+	skippedBreakdown := make(map[string]int)
+	for _, agent := range allResult.Items {
+		if req.StructuredMessage.Sender == "agent:"+agent.Slug {
+			continue
+		}
+		if agent.Phase == string(state.PhaseRunning) {
+			targeted++
+		} else {
+			skippedBreakdown[agent.Phase]++
+		}
+	}
+	skipped := 0
+	for _, c := range skippedBreakdown {
+		skipped += c
+	}
+
+	// Collect running agents from the already-fetched list for direct fan-out.
+	var runningAgents []store.Agent
+	for _, agent := range allResult.Items {
+		if req.StructuredMessage.Sender == "agent:"+agent.Slug {
+			continue
+		}
+		if agent.Phase == string(state.PhaseRunning) {
+			runningAgents = append(runningAgents, agent)
+		}
+	}
+
 	proxy := s.GetMessageBrokerProxy()
 	if proxy == nil {
 		// Fallback: no broker configured, do direct fan-out
-		s.broadcastDirect(w, r, projectID, req.StructuredMessage, req.Interrupt)
+		if !s.broadcastDirect(w, r, projectID, req.StructuredMessage, req.Interrupt, runningAgents) {
+			return
+		}
+		s.writeBroadcastResponse(w, targeted+skipped, targeted, skipped, skippedBreakdown)
 		return
 	}
 
@@ -2870,73 +3025,115 @@ func (s *Server) handleProjectBroadcast(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	s.writeBroadcastResponse(w, targeted+skipped, targeted, skipped, skippedBreakdown)
 }
 
-// broadcastDirect fans out a broadcast message directly to all running agents
-// in the project without using the message broker. This is the fallback when
-// no broker is configured.
-func (s *Server) broadcastDirect(w http.ResponseWriter, r *http.Request, projectID string, msg *messages.StructuredMessage, interrupt bool) {
+// BroadcastAcceptedResponse is the JSON response for a broadcast message.
+type BroadcastAcceptedResponse struct {
+	Status           string         `json:"status"`
+	Total            int            `json:"total"`
+	Targeted         int            `json:"targeted"`
+	Skipped          int            `json:"skipped"`
+	SkippedBreakdown map[string]int `json:"skipped_breakdown,omitempty"`
+}
+
+func (s *Server) writeBroadcastResponse(w http.ResponseWriter, total, targeted, skipped int, skippedBreakdown map[string]int) {
+	resp := BroadcastAcceptedResponse{
+		Status:   "accepted",
+		Total:    total,
+		Targeted: targeted,
+		Skipped:  skipped,
+	}
+	if len(skippedBreakdown) > 0 {
+		resp.SkippedBreakdown = skippedBreakdown
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(resp)
+}
+
+// broadcastDirect fans out a broadcast message directly to the given running agents
+// without using the message broker. The caller provides pre-filtered running agents
+// (already excluding the sender) from the same ListAgents query used for targeting counts.
+// Returns true on success (caller writes 202 response), false if an error response was written.
+func (s *Server) broadcastDirect(w http.ResponseWriter, r *http.Request, projectID string, msg *messages.StructuredMessage, interrupt bool, runningAgents []store.Agent) bool {
 	ctx := r.Context()
 	dispatcher := s.GetDispatcher()
 	if dispatcher == nil {
 		ServiceNotReady(w, "Message dispatch is not available yet — the server may still be starting up")
-		return
+		return false
 	}
 
-	result, err := s.store.ListAgents(ctx, store.AgentFilter{
-		ProjectID: projectID,
-		Phase:     "running",
-	}, store.ListOptions{})
-	if err != nil {
-		writeErrorFromErr(w, err, "")
-		return
-	}
-
-	for _, agent := range result.Items {
-		// Skip the sender if it's an agent
-		if msg.Sender == "agent:"+agent.Slug {
-			continue
-		}
+	for _, agent := range runningAgents {
 		agentMsg := *msg
 		agentMsg.Recipient = "agent:" + agent.Slug
 		agentMsg.RecipientID = agent.ID
-		dispatched := false
-		if err := dispatcher.DispatchAgentMessage(ctx, &agent, agentMsg.Msg, interrupt, &agentMsg); errors.Is(err, ErrMessageDeferred) {
-			s.signalDeferredMessage(ctx, agent.RuntimeBrokerID, agent.ID)
-		} else if err != nil {
-			s.messageLog.Error("Failed to deliver broadcast message to agent",
-				"agent_id", agent.ID,
-				"agentSlug", agent.Slug, "error", err)
-		} else {
-			dispatched = true
-		}
-		// Persist broadcast message per recipient (non-fatal)
+
 		storeMsg := &store.Message{
-			ID:          api.NewUUID(),
-			ProjectID:   projectID,
-			Sender:      agentMsg.Sender,
-			SenderID:    agentMsg.SenderID,
-			Recipient:   agentMsg.Recipient,
-			RecipientID: agentMsg.RecipientID,
-			Msg:         agentMsg.Msg,
-			Type:        agentMsg.Type,
-			Urgent:      agentMsg.Urgent,
-			Broadcasted: true,
-			AgentID:     agent.ID,
-			CreatedAt:   time.Now(),
+			ID:            api.NewUUID(),
+			ProjectID:     projectID,
+			Sender:        agentMsg.Sender,
+			SenderID:      agentMsg.SenderID,
+			Recipient:     agentMsg.Recipient,
+			RecipientID:   agentMsg.RecipientID,
+			Msg:           agentMsg.Msg,
+			Type:          agentMsg.Type,
+			Urgent:        agentMsg.Urgent,
+			Broadcasted:   true,
+			AgentID:       agent.ID,
+			DispatchState: store.MessageDispatchDispatched,
+			CreatedAt:     time.Now(),
 		}
 		if err := s.store.CreateMessage(ctx, storeMsg); err != nil {
 			s.messageLog.Error("Failed to persist broadcast message", "agent_id", agent.ID, "error", err)
-		} else if dispatched {
-			// Mark dispatched so reconcileBroker does not re-deliver.
-			if _, err := s.store.MarkMessageDispatched(ctx, storeMsg.ID); err != nil {
-				s.messageLog.Error("Failed to mark broadcast message dispatched", "id", storeMsg.ID, "error", err)
+		}
+
+		retryCtx, retryCancel := context.WithTimeout(ctx, 30*time.Second)
+		dispatchErr := dispatchWithBrokerRetry(retryCtx, dispatcher, &agent, agentMsg.Msg, interrupt, &agentMsg)
+		retryCancel()
+
+		if dispatchErr != nil {
+			s.messageLog.Error("Failed to deliver broadcast message to agent",
+				"agent_id", agent.ID,
+				"agentSlug", agent.Slug, "error", dispatchErr)
+			if markErr := s.store.MarkMessageFailed(ctx, storeMsg.ID, dispatchErr.Error()); markErr != nil {
+				s.messageLog.Error("Failed to mark broadcast message as failed", "id", storeMsg.ID, "error", markErr)
 			}
+			s.publishBroadcastDeliveryFailed(ctx, &agent, &agentMsg, dispatchErr)
 		}
 	}
+	return true
+}
 
-	w.WriteHeader(http.StatusOK)
+// publishBroadcastDeliveryFailed publishes a DELIVERY_FAILED notification to the
+// message sender when a per-agent broadcast delivery fails.
+func (s *Server) publishBroadcastDeliveryFailed(ctx context.Context, targetAgent *store.Agent, msg *messages.StructuredMessage, deliveryErr error) {
+	if !strings.HasPrefix(msg.Sender, "agent:") || msg.SenderID == "" {
+		return
+	}
+	senderAgent, err := s.store.GetAgent(ctx, msg.SenderID)
+	if err != nil {
+		return
+	}
+
+	failMsg := fmt.Sprintf("Broadcast delivery failed to agent %q: %v", targetAgent.Slug, deliveryErr)
+	structuredMsg := &messages.StructuredMessage{
+		Sender:      "system",
+		Recipient:   msg.Sender,
+		RecipientID: senderAgent.ID,
+		Msg:         failMsg,
+		Type:        messages.TypeStateChange,
+		Status:      "DELIVERY_FAILED",
+	}
+
+	dispatcher := s.GetDispatcher()
+	if dispatcher == nil {
+		return
+	}
+	if err := dispatcher.DispatchAgentMessage(ctx, senderAgent, failMsg, false, structuredMsg); err != nil {
+		s.messageLog.Error("Failed to dispatch broadcast DELIVERY_FAILED notification",
+			"sender_id", msg.SenderID, "target_agent", targetAgent.Slug, "error", err)
+	}
 }
 
 func (s *Server) updateAgentStatus(w http.ResponseWriter, r *http.Request, id string) {
@@ -5235,11 +5432,15 @@ func (s *Server) handleProjectAgentAction(w http.ResponseWriter, r *http.Request
 		if err == store.ErrNotFound {
 			agent, err = s.store.GetAgent(ctx, agentID)
 			if err != nil {
-				writeErrorFromErr(w, err, "")
+				writeError(w, http.StatusNotFound, ErrCodeAgentNotFound,
+					fmt.Sprintf("Agent %q not found in project", agentID),
+					map[string]interface{}{"agent_slug": agentID, "project_id": projectID})
 				return
 			}
 			if agent.ProjectID != projectID {
-				NotFound(w, "Agent")
+				writeError(w, http.StatusNotFound, ErrCodeAgentNotFound,
+					fmt.Sprintf("Agent %q not found in project", agentID),
+					map[string]interface{}{"agent_slug": agentID, "project_id": projectID})
 				return
 			}
 		} else {

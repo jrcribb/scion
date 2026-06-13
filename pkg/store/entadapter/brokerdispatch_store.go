@@ -251,6 +251,23 @@ func (s *BrokerDispatchStore) MarkMessageDispatched(ctx context.Context, id stri
 	return affected == 1, nil
 }
 
+// MarkMessageFailed sets a message's dispatch_state to "failed" and records the reason.
+func (s *BrokerDispatchStore) MarkMessageFailed(ctx context.Context, id string, reason string) error {
+	uid, err := parseUUID(id)
+	if err != nil {
+		return err
+	}
+	_, err = s.client.Message.Update().
+		Where(message.IDEQ(uid), message.DispatchStateNEQ(store.MessageDispatchFailed)).
+		SetDispatchState(store.MessageDispatchFailed).
+		SetNillableDispatchFailureReason(&reason).
+		Save(ctx)
+	if err != nil {
+		return mapError(err)
+	}
+	return nil
+}
+
 // CountStuckPendingMessages returns the number of messages still in
 // dispatch_state='pending' whose created timestamp is before the given cutoff.
 func (s *BrokerDispatchStore) CountStuckPendingMessages(ctx context.Context, before time.Time) (int, error) {

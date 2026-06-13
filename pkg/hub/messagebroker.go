@@ -44,13 +44,12 @@ const brokerCallbackTimeout = 30 * time.Second
 //   - Manages subscriptions based on agent lifecycle events (created/deleted)
 //   - Handles broadcast fan-out from a single broker publish to individual agent deliveries
 type MessageBrokerProxy struct {
-	bus            eventbus.EventBus
-	store          store.Store
-	events         EventPublisher
-	getDispatcher  func() AgentDispatcher
-	signalDeferred func(ctx context.Context, brokerID, agentID string) // NOTIFY wakeup for deferred messages
-	log            *slog.Logger
-	messageLog     *slog.Logger
+	bus           eventbus.EventBus
+	store         store.Store
+	events        EventPublisher
+	getDispatcher func() AgentDispatcher
+	log           *slog.Logger
+	messageLog    *slog.Logger
 
 	mu                  sync.Mutex
 	subscriptions       map[string][]eventbus.Subscription // projectID -> active subscriptions
@@ -80,12 +79,6 @@ func NewMessageBrokerProxy(
 		subscribedTopics:    make(map[string]bool),
 		stopCh:              make(chan struct{}),
 	}
-}
-
-// SetSignalDeferred injects the callback used to emit a NOTIFY wakeup when a
-// message dispatch is deferred (broker not locally connected).
-func (p *MessageBrokerProxy) SetSignalDeferred(fn func(ctx context.Context, brokerID, agentID string)) {
-	p.signalDeferred = fn
 }
 
 // Start subscribes to agent lifecycle events and sets up broker subscriptions
@@ -517,10 +510,14 @@ func (p *MessageBrokerProxy) deliverToAgent(ctx context.Context, projectID, agen
 		return
 	}
 
+	// Validate agent existence BEFORE persisting to avoid orphan message rows.
 	agent, err := p.store.GetAgentBySlug(ctx, projectID, agentSlug)
 	if err != nil {
-		p.log.Error("Failed to find agent for broker message delivery",
+		p.log.Warn("Agent not found for broker message delivery",
 			"agentSlug", agentSlug, "projectID", projectID, "error", err)
+		if errors.Is(err, store.ErrNotFound) {
+			p.publishDeliveryFailed(ctx, projectID, agentSlug, msg, err)
+		}
 		return
 	}
 
@@ -530,44 +527,37 @@ func (p *MessageBrokerProxy) deliverToAgent(ctx context.Context, projectID, agen
 		return
 	}
 
-	// Persist to message store first so the row is durable intent for
-	// cross-node dispatch (dispatch_state defaults to pending).
+	// Persist to message store before delivery attempt (no pending rows).
 	storeMsg := &store.Message{
-		ID:          api.NewUUID(),
-		ProjectID:   projectID,
-		Sender:      msg.Sender,
-		SenderID:    msg.SenderID,
-		Recipient:   msg.Recipient,
-		RecipientID: msg.RecipientID,
-		Msg:         msg.Msg,
-		Type:        msg.Type,
-		Urgent:      msg.Urgent,
-		Broadcasted: msg.Broadcasted,
-		AgentID:     agent.ID,
-		CreatedAt:   time.Now(),
+		ID:            api.NewUUID(),
+		ProjectID:     projectID,
+		Sender:        msg.Sender,
+		SenderID:      msg.SenderID,
+		Recipient:     msg.Recipient,
+		RecipientID:   msg.RecipientID,
+		Msg:           msg.Msg,
+		Type:          msg.Type,
+		Urgent:        msg.Urgent,
+		Broadcasted:   msg.Broadcasted,
+		AgentID:       agent.ID,
+		DispatchState: store.MessageDispatchDispatched,
+		CreatedAt:     time.Now(),
 	}
 	if err := p.store.CreateMessage(ctx, storeMsg); err != nil {
 		p.log.Error("Failed to persist broker message to store", "agentSlug", agentSlug, "error", err)
-		// Without a durable row, a deferred signal has nothing for the
-		// owning node to reconcile — abort dispatch entirely.
 		return
 	}
 
-	if err := dispatcher.DispatchAgentMessage(ctx, agent, msg.Msg, msg.Urgent, msg); errors.Is(err, ErrMessageDeferred) {
-		if p.signalDeferred != nil {
-			p.signalDeferred(ctx, agent.RuntimeBrokerID, agent.ID)
-		}
-		return
-	} else if err != nil {
+	// The 30s brokerCallbackTimeout is shared with pre-dispatch work above
+	// (agent lookup, persistence), so retries get slightly less than 30s.
+	if err := dispatchWithBrokerRetry(ctx, dispatcher, agent, msg.Msg, msg.Urgent, msg); err != nil {
 		p.log.Error("Failed to dispatch broker message to agent",
 			"agentSlug", agentSlug, "error", err)
+		if markErr := p.store.MarkMessageFailed(ctx, storeMsg.ID, err.Error()); markErr != nil {
+			p.log.Error("Failed to mark broker message as failed", "id", storeMsg.ID, "error", markErr)
+		}
+		p.publishDeliveryFailed(ctx, projectID, agentSlug, msg, err)
 		return
-	}
-
-	// Mark the message as dispatched so reconcileBroker does not
-	// re-deliver it on the next broker reconnect.
-	if _, err := p.store.MarkMessageDispatched(ctx, storeMsg.ID); err != nil {
-		p.log.Error("Failed to mark broker message dispatched", "id", storeMsg.ID, "error", err)
 	}
 
 	// Log to dedicated message audit log
@@ -650,6 +640,47 @@ func recipientSlug(recipient string) string {
 		}
 	}
 	return recipient
+}
+
+// publishDeliveryFailed publishes a DELIVERY_FAILED notification event when
+// a broker message cannot be delivered to an agent. If the sender is an agent,
+// the notification is dispatched to the sender so it learns about the failure.
+// When deliveryErr is a non-ErrNotFound error, the message includes the actual
+// error; otherwise it reports the agent as not found.
+func (p *MessageBrokerProxy) publishDeliveryFailed(ctx context.Context, projectID, agentSlug string, msg *messages.StructuredMessage, deliveryErr error) {
+	if !strings.HasPrefix(msg.Sender, "agent:") || msg.SenderID == "" {
+		return
+	}
+	senderAgent, err := p.store.GetAgent(ctx, msg.SenderID)
+	if err != nil {
+		p.log.Warn("Could not resolve sender agent for DELIVERY_FAILED notification",
+			"senderID", msg.SenderID, "error", err)
+		return
+	}
+
+	var failMsg string
+	if deliveryErr != nil && !errors.Is(deliveryErr, store.ErrNotFound) {
+		failMsg = fmt.Sprintf("Message delivery failed to agent %q: %v", agentSlug, deliveryErr)
+	} else {
+		failMsg = fmt.Sprintf("Message delivery failed: agent %q not found in project", agentSlug)
+	}
+	structuredMsg := &messages.StructuredMessage{
+		Sender:    "system",
+		Recipient: msg.Sender,
+		Msg:       failMsg,
+		Type:      messages.TypeStateChange,
+		Status:    "DELIVERY_FAILED",
+	}
+	structuredMsg.RecipientID = senderAgent.ID
+
+	dispatcher := p.getDispatcher()
+	if dispatcher == nil {
+		return
+	}
+	if err := dispatcher.DispatchAgentMessage(ctx, senderAgent, failMsg, false, structuredMsg); err != nil {
+		p.log.Warn("Failed to dispatch DELIVERY_FAILED notification",
+			"senderID", msg.SenderID, "error", err)
+	}
 }
 
 // containsSuffix checks if a dot-separated subject string ends with the given suffix.

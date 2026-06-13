@@ -61,6 +61,12 @@ const (
 	ErrCodeCloneFailed    = "clone_failed"
 	ErrCodePullFailed     = "pull_failed"
 
+	// Delivery error codes
+	ErrCodeAgentNotFound   = "agent_not_found"
+	ErrCodeDeliveryFailed  = "delivery_failed"
+	ErrCodeAgentNotRunning = "agent_not_running"
+	ErrCodeBrokerTimeout   = "broker_timeout"
+
 	// Broker authentication error codes
 	ErrCodeInvalidJoinToken = "invalid_join_token"
 	ErrCodeExpiredJoinToken = "expired_join_token"
@@ -210,7 +216,7 @@ func RuntimeError(w http.ResponseWriter, message string) {
 
 // GatewayTimeout writes a 504 Gateway Timeout response for runtime broker timeouts.
 func GatewayTimeout(w http.ResponseWriter, message string) {
-	writeError(w, http.StatusGatewayTimeout, ErrCodeUnavailable, message, nil)
+	writeError(w, http.StatusGatewayTimeout, ErrCodeBrokerTimeout, message, nil)
 }
 
 // NoRuntimeBroker writes a 422 Unprocessable Entity response when no runtime broker

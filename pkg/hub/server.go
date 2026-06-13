@@ -1566,7 +1566,6 @@ func (s *Server) StartNotificationDispatcher() {
 	nd := NewNotificationDispatcher(s.store, s.events, s.GetDispatcher, logging.Subsystem("hub.notifications"))
 	nd.messageLog = s.dedicatedMessageLog
 	nd.channelRegistry = s.channelRegistry
-	nd.signalDeferred = s.signalDeferredMessage
 	s.notificationDispatcher = nd
 	s.notificationDispatcher.Start()
 }
@@ -1625,7 +1624,6 @@ func (s *Server) StartMessageBroker(b eventbus.EventBus) {
 
 	proxy := NewMessageBrokerProxy(b, s.store, s.events, s.GetDispatcher, logging.Subsystem("hub.broker"))
 	proxy.messageLog = s.dedicatedMessageLog
-	proxy.SetSignalDeferred(s.signalDeferredMessage)
 	s.messageBrokerProxy = proxy
 	proxy.Start()
 
@@ -1949,13 +1947,15 @@ func (s *Server) messageEventHandler() EventHandler {
 		}
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
-				slog.Warn("Scheduler: target agent no longer exists, dropping scheduled message",
+				slog.Warn("Scheduler: target agent no longer exists, marking event as failed",
 					"eventID", evt.ID,
 					"agentName", payload.AgentName,
 					"agent_id", payload.AgentID,
 					"projectID", evt.ProjectID,
 					"message", payload.Message)
-				return fmt.Errorf("target agent %q no longer exists", targetName)
+				now := time.Now()
+				_ = s.store.UpdateScheduledEventStatus(ctx, evt.ID, store.ScheduledEventFailed, &now, "target agent deleted")
+				return nil
 			}
 			return fmt.Errorf("failed to resolve agent %q: %w", targetName, err)
 		}
@@ -1972,16 +1972,14 @@ func (s *Server) messageEventHandler() EventHandler {
 		structuredMsg.Plain = payload.Plain
 		structuredMsg.Urgent = payload.Interrupt
 
-		if err := dispatcher.DispatchAgentMessage(ctx, agent, payload.Message, payload.Interrupt, structuredMsg); errors.Is(err, ErrMessageDeferred) {
-			s.signalDeferredMessage(ctx, agent.RuntimeBrokerID, agent.ID)
-			slog.Info("Scheduler: message deferred for cross-node delivery",
-				"eventID", evt.ID, "agent_id", agent.ID, "agentName", agent.Name)
-		} else if err != nil {
+		retryCtx, retryCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer retryCancel()
+
+		if err := dispatchWithBrokerRetry(retryCtx, dispatcher, agent, payload.Message, payload.Interrupt, structuredMsg); err != nil {
 			return fmt.Errorf("failed to dispatch message to agent %s: %w", agent.Name, err)
-		} else {
-			slog.Info("Scheduler: message delivered to agent",
-				"eventID", evt.ID, "agent_id", agent.ID, "agentName", agent.Name)
 		}
+		slog.Info("Scheduler: message delivered to agent",
+			"eventID", evt.ID, "agent_id", agent.ID, "agentName", agent.Name)
 		return nil
 	}
 }
