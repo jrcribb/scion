@@ -45,6 +45,9 @@ export class MessageRenderer {
   private agentRing: AgentRing | null = null;
   /** Tracks recently seen broadcasts for dedup: key -> timestamp of first occurrence. */
   private recentBroadcasts: Map<string, number> = new Map();
+  // summarizeContent runs in the per-frame draw loop; cache by content so we don't re-run the
+  // regex/split work at 60fps for every active message.
+  private summaryCache: Map<string, string> = new Map();
 
   setAgentRing(ring: AgentRing): void {
     this.agentRing = ring;
@@ -231,14 +234,16 @@ export class MessageRenderer {
       ctx.stroke();
     }
 
-    // Content label along the midpoint of the line
+    // Content label near the SOURCE end of the line (not mid-edge) — it reads as "this is what
+    // the sender just produced + is handing off", and stays clear of the recipient ring.
     if (msg.content && elapsed < LABEL_DURATION) {
       const labelAlpha = elapsed < PULSE_DURATION
         ? Math.min(1, (elapsed / PULSE_DURATION) * 2)
         : 1 - (elapsed - PULSE_DURATION) / (LABEL_DURATION - PULSE_DURATION);
 
-      const midX = (s.x + r.x) / 2;
-      const midY = (s.y + r.y) / 2;
+      const frac = 0.28; // 28% of the way from sender → recipient
+      const midX = s.x + (r.x - s.x) * frac;
+      const midY = s.y + (r.y - s.y) * frac;
 
       // Extract a short summary from content
       const label = this.summarizeContent(msg.content);
@@ -268,12 +273,30 @@ export class MessageRenderer {
 
   private summarizeContent(content: string): string {
     if (!content) return '';
-    // Extract key state from content like "poet-blue has reached a state of COMPLETED: ..."
-    const stateMatch = content.match(/state of (\w+)/i);
-    if (stateMatch) return stateMatch[1];
-    // Truncate long content
-    if (content.length > 30) return content.substring(0, 27) + '...';
-    return content;
+    const cached = this.summaryCache.get(content);
+    if (cached !== undefined) return cached;
+
+    let s = content.trim().replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '').trim();
+    // Legacy scion state messages: "… has reached a state of COMPLETED: …"
+    const stateMatch = s.match(/state of (\w+)/i);
+    let result: string;
+    if (stateMatch) {
+      result = stateMatch[1];
+    } else {
+      // JSON/array payload → pull a "title" if there is one, else strip the punctuation.
+      if (s[0] === '[' || s[0] === '{') {
+        const m = s.match(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+        s = m ? m[1].replace(/\\"/g, '"') : s.replace(/[[\]{}"]/g, ' ').trim();
+      }
+      // First meaningful, de-marked line (drop leading #, >, *, - markdown).
+      for (const line of s.split('\n')) {
+        const ln = line.replace(/^[#>*\-\s]+/, '').trim();
+        if (ln) { s = ln; break; }
+      }
+      result = s.length > 26 ? s.slice(0, 25) + '…' : s;
+    }
+    this.summaryCache.set(content, result);
+    return result;
   }
 
   private hexToRgba(hex: string, alpha: number): string {
