@@ -44,7 +44,7 @@ func runRegistriesList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Hub connection required: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 	defer cancel()
 
 	resp, err := hubCtx.Client.SkillRegistries().List(ctx)
@@ -83,7 +83,7 @@ func runRegistriesAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Hub connection required: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 	defer cancel()
 
 	endpoint, _ := cmd.Flags().GetString("endpoint")
@@ -133,7 +133,7 @@ func runRegistriesShow(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Hub connection required: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 	defer cancel()
 
 	registry, err := hubCtx.Client.SkillRegistries().Get(ctx, args[0])
@@ -175,7 +175,7 @@ func runRegistriesUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Hub connection required: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 	defer cancel()
 
 	endpoint, _ := cmd.Flags().GetString("endpoint")
@@ -185,13 +185,24 @@ func runRegistriesUpdate(cmd *cobra.Command, args []string) error {
 	authToken, _ := cmd.Flags().GetString("auth-token")
 	resolvePath, _ := cmd.Flags().GetString("resolve-path")
 
-	req := &hubclient.UpdateSkillRegistryRequest{
-		Endpoint:    endpoint,
-		TrustLevel:  trust,
-		Status:      status,
-		Description: description,
-		AuthToken:   authToken,
-		ResolvePath: resolvePath,
+	req := &hubclient.UpdateSkillRegistryRequest{}
+	if cmd.Flags().Changed("endpoint") {
+		req.Endpoint = &endpoint
+	}
+	if cmd.Flags().Changed("trust") {
+		req.TrustLevel = &trust
+	}
+	if cmd.Flags().Changed("status") {
+		req.Status = &status
+	}
+	if cmd.Flags().Changed("description") {
+		req.Description = &description
+	}
+	if cmd.Flags().Changed("auth-token") {
+		req.AuthToken = &authToken
+	}
+	if cmd.Flags().Changed("resolve-path") {
+		req.ResolvePath = &resolvePath
 	}
 
 	registry, err := hubCtx.Client.SkillRegistries().Update(ctx, args[0], req)
@@ -220,7 +231,7 @@ func runRegistriesRemove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Hub connection required: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 	defer cancel()
 
 	if err := hubCtx.Client.SkillRegistries().Delete(ctx, args[0]); err != nil {
@@ -248,7 +259,7 @@ func runRegistriesPin(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("Hub connection required: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
 	defer cancel()
 
 	hash, _ := cmd.Flags().GetString("hash")
