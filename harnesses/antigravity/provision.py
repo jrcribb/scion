@@ -29,7 +29,7 @@ try:
 except ImportError:
     scion_harness = None  # type: ignore[assignment]
 
-PROVISION_VERSION = "2026-05-18T17:20:00Z"
+PROVISION_VERSION = "2026-06-25T00:00:00Z"
 
 VALID_AUTH_TYPES = ("oauth-token", "vertex-ai", "none")
 
@@ -116,6 +116,14 @@ def _select_auth_method(
     has_gcp_project = any(k in env_keys for k in ("GOOGLE_CLOUD_PROJECT",))
     has_gcp_location = any(k in env_keys for k in ("GOOGLE_CLOUD_LOCATION", "GOOGLE_CLOUD_REGION"))
 
+    # The host-side forwarder may not pass GOOGLE_CLOUD_LOCATION through
+    # auth-candidates (only GOOGLE_CLOUD_REGION is forwarded). Fall back
+    # to checking os.environ so the provisioner still detects GCP config.
+    gcp_project = has_gcp_project or bool(os.environ.get("GOOGLE_CLOUD_PROJECT"))
+    gcp_location = has_gcp_location or bool(
+        os.environ.get("GOOGLE_CLOUD_LOCATION") or os.environ.get("GOOGLE_CLOUD_REGION")
+    )
+
     if explicit:
         if explicit not in VALID_AUTH_TYPES:
             raise ValueError(
@@ -123,13 +131,11 @@ def _select_auth_method(
                 f"valid types are: {', '.join(VALID_AUTH_TYPES)}"
             )
         if explicit == "vertex-ai":
-            if not has_token:
-                raise ValueError("antigravity: auth type 'vertex-ai' selected but AGY_TOKEN secret not found")
-            if not has_gcp_project:
+            if not gcp_project:
                 raise ValueError("antigravity: auth type 'vertex-ai' selected but GOOGLE_CLOUD_PROJECT not found")
-            if not has_gcp_location:
+            if not gcp_location:
                 raise ValueError("antigravity: auth type 'vertex-ai' selected but GOOGLE_CLOUD_LOCATION/REGION not found")
-            return "vertex-ai", "AGY_TOKEN"
+            return "vertex-ai", ""
         if explicit == "oauth-token":
             if not has_token:
                 raise ValueError("antigravity: auth type 'oauth-token' selected but AGY_TOKEN secret not found")
@@ -137,9 +143,9 @@ def _select_auth_method(
         if explicit == "none":
             return "none", ""
 
+    if gcp_project and gcp_location:
+        return "vertex-ai", ""
     if has_token:
-        if has_gcp_project and has_gcp_location:
-            return "vertex-ai", "AGY_TOKEN"
         return "oauth-token", "AGY_TOKEN"
 
     return "none", ""
@@ -311,6 +317,9 @@ print('agy-wrapper: patched settings.json with gcp config', file=sys.stderr)
     else
         echo "agy-wrapper: WARNING: GCP mode but GOOGLE_CLOUD_PROJECT not set" >&2
     fi
+
+    export USE_ADC=1
+    echo "agy-wrapper: ADC mode enabled (USE_ADC=1)" >&2
 
     python3 -c "
 import json, sys
@@ -603,7 +612,7 @@ def _provision(manifest: dict[str, Any]) -> int:
 
     # Validate token if an auth method requiring it was selected
     has_token = False
-    if method in ("oauth-token", "vertex-ai"):
+    if method == "oauth-token":
         token_raw = _read_secret(secret_files, "AGY_TOKEN")
         if not token_raw:
             # AGY_TOKEN may be a file-type secret bind-mounted directly to its
