@@ -543,9 +543,15 @@ type InitMachineOpts struct {
 	Force bool
 
 	// HarnessesFS is the embedded harnesses/ filesystem used to seed
-	// directory-based harness-configs. When non-nil, SeedAllHarnessConfigsFromEmbed
-	// is called to seed all harnesses found in the FS.
+	// directory-based harness-configs. Kept for backward compatibility with
+	// upgrade code; the primary seeding path now uses MaterializeBundledResources.
 	HarnessesFS fs.FS
+
+	// SelectedHarnessConfigs, when non-nil, restricts harness-config
+	// materialization to only the named configs. Templates are still
+	// materialized unconditionally. An empty non-nil slice skips all
+	// harness-config materialization.
+	SelectedHarnessConfigs []string
 }
 
 // InitMachine performs full global/machine-level setup: creates ~/.scion/,
@@ -589,7 +595,6 @@ func InitMachine(harnesses []api.Harness, opts ...InitMachineOpts) error {
 		opt = opts[0]
 	}
 
-	templatesDir := filepath.Join(globalDir, "templates")
 	agentsDir := filepath.Join(globalDir, "agents")
 	harnessConfigsDir := filepath.Join(globalDir, harnessConfigsDirName)
 
@@ -597,17 +602,18 @@ func InitMachine(harnesses []api.Harness, opts ...InitMachineOpts) error {
 		return fmt.Errorf("failed to create global agents directory: %w", err)
 	}
 
-	// Seed default agnostic template
-	if err := SeedAgnosticTemplate(filepath.Join(templatesDir, "default"), opt.Force); err != nil {
-		return fmt.Errorf("failed to seed global default agnostic template: %w", err)
-	}
-
-	// Seed all directory-based harnesses unconditionally from the embedded
-	// harnesses/ FS. The directories are inert until activated, so seeding
-	// them all is safe. Selective materialization will be addressed in PR 5.
-	if opt.HarnessesFS != nil {
-		if err := SeedAllHarnessConfigsFromEmbed(harnessConfigsDir, opt.HarnessesFS, opt.Force); err != nil {
-			return fmt.Errorf("failed to seed harness-configs from embed: %w", err)
+	matOpts := MaterializeOptions{Force: opt.Force}
+	if opt.SelectedHarnessConfigs != nil {
+		// Selective mode: materialize only templates + named harness-configs.
+		if err := MaterializeBundledTemplates(globalDir, matOpts); err != nil {
+			return fmt.Errorf("failed to materialize bundled templates: %w", err)
+		}
+		if err := MaterializeSelectedHarnessConfigs(globalDir, opt.SelectedHarnessConfigs, matOpts); err != nil {
+			return fmt.Errorf("failed to materialize selected harness-configs: %w", err)
+		}
+	} else {
+		if err := MaterializeBundledResources(globalDir, matOpts); err != nil {
+			return fmt.Errorf("failed to materialize bundled resources: %w", err)
 		}
 	}
 
